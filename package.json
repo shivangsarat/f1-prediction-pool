@@ -1,0 +1,14 @@
+{
+  "name": "f1-prediction-pool", "private": true, "version": "0.1.0", "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "npm run dev -w @f1/web & npm run dev -w @f1/api & wait",
+    "dev:api": "node --experimental-strip-types --watch apps/api/src/server.ts",
+    "dev:web": "npm run dev -w @f1/web",
+    "start": "node --experimental-strip-types apps/api/src/server.ts",
+    "test": "node --experimental-strip-types --test packages/core/src/*.test.ts apps/api/src/*.test.ts",
+    "build": "npm run build -w @f1/web",
+    "typecheck": "tsc --noEmit -p apps/web/tsconfig.json"
+  },
+  "engines": {"node": ">=22.13"}
+}

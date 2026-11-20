@@ -1,0 +1,23 @@
+services:
+  pool:
+    build: .
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    ports:
+      - '127.0.0.1:8080:8080'
+    env_file:
+      - .env
+    environment:
+      PORT: '8080'
+      HOST: '0.0.0.0'
+      DB_PATH: /app/data/pool.sqlite
+      BACKUP_DIR: /app/backups
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
