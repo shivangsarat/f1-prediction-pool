@@ -1,8 +1,8 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
-/** ChampionshipPage renders the tournament-scoped championship experience. */
+import {useCallback, useEffect, useState} from 'react';
+import {ArrowRight, CalendarDays, Crown, Save, Trophy} from 'lucide-react';
+import {get, put, date} from '../api';
+import {Card, SectionHeading, Pill, Select, Action} from '../shared/ui';
+/** Display and save championship predictions under this tournament’s preseason and salvage locks. */
 export function ChampionshipPage({season, drivers, teams, user, toast}: {season: any; drivers: any[]; teams: any[]; user: {id: string}; toast: (s: string) => void}) {
 
   const [all, setAll] = useState<any[]>([]), [wdc, setWdc] = useState(''), [wcc, setWcc] = useState(''), [saving, setSaving] = useState('');

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {Activity, ArrowLeft, ChevronRight, Crown, FlagTriangleRight, Info, LogOut, Menu, Shield, Target, Trophy, Users, Wallet, X, BookOpen} from 'lucide-react';
 import {get, post} from '../api';
 import {Action, Card, Notice, type View} from '../shared/ui';

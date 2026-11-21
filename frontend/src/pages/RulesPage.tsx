@@ -1,4 +1,3 @@
-import React from 'react';
 import {Card, SectionHeading} from '../shared/ui';
 
 /** Render the signed-off pool rules inside the currently selected tournament. */

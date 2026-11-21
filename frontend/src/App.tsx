@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {FlagTriangleRight} from 'lucide-react';
 import {get, post} from './api';
 import {AuthScreen} from './pages/AuthScreen';

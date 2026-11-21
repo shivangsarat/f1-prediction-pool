@@ -1,8 +1,7 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
-/** Overview renders the tournament-scoped overview experience. */
+import {ArrowRight, CalendarDays, ChevronRight, Clock, Coins, Flag, FlagTriangleRight, Info, LockKeyhole, Target, Trophy} from 'lucide-react';
+import {money, date} from '../api';
+import {Card, Metric, Pill, Action, useCountdown, type View} from '../shared/ui';
+/** Summarize the current tournament’s schedule, standings and entry status. */
 export function Overview({season, weekends, standings, ledger, user, navigate}: {season: any; weekends: any[]; standings: any[]; ledger: any; user: any; navigate: (v: View) => void}) {
 
   const upcoming = weekends.find(w => !w.qualifyingLocked) || (weekends.find(w => !w.race_at || Date.parse(w.race_at) > Date.now())) || weekends[weekends.length - 1];

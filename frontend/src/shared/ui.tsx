@@ -1,6 +1,6 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {date} from '../api';
+import React, {useEffect, useState} from 'react';
+import {CheckCircle2, Info, RefreshCw} from 'lucide-react';
+
 export type View = 'overview' | 'picks' | 'standings' | 'ledger' | 'championship' | 'rules' | 'admin';
 export type Form = 'gp' | 'sprint' | 'unified';
 /** Compare display codes independently of punctuation/case. */

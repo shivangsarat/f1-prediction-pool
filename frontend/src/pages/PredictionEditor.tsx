@@ -1,8 +1,8 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
-/** PredictionEditor renders the tournament-scoped predictioneditor experience. */
+import {useEffect, useMemo, useState} from 'react';
+import {ArrowDown, ArrowUp, CheckCircle2, Clock, LockKeyhole, Save, ShieldCheck, Wifi} from 'lucide-react';
+import {get, date} from '../api';
+import {Pill, Notice, Select, Action, useCountdown, mkDefault, emptySprint, type Form} from '../shared/ui';
+/** Render reusable GP, Sprint and combined forms with driver validation and deadline status. */
 export function PredictionEditor({kind, existing, drivers, teams, deadline, onSave}: {kind: Form; existing: any; drivers: any[]; teams: any[]; deadline: string; onSave: (form: Form, p: any) => Promise<void>}) {
 
   const defaults = useMemo(() => mkDefault(drivers), [drivers]);

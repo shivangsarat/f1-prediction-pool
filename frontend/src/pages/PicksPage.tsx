@@ -1,9 +1,9 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
+import {useCallback, useEffect, useState} from 'react';
+import {Info, RefreshCw, ShieldCheck, Trophy, Users} from 'lucide-react';
+import {get, put} from '../api';
+import {Card, SectionHeading, Pill, Select, Action, type Form} from '../shared/ui';
 import {PredictionEditor} from './PredictionEditor';
-/** PicksPage renders the tournament-scoped picks experience. */
+/** Manage blind race predictions and reveal published peer picks for one tournament. */
 export function PicksPage({season, weekends, drivers, teams, user, toast}: {season: any; weekends: any[]; drivers: any[]; teams: any[]; user: any; toast: (s: string) => void}) {
 
   const [activeId, setActiveId] = useState(''), [data, setData] = useState<any>(null), [revealed, setRevealed] = useState<any[]>([]), [weekly, setWeekly] = useState<any[]>([]), [loading, setLoading] = useState(false);

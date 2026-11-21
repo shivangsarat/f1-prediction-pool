@@ -1,8 +1,7 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
-/** LedgerPage renders the tournament-scoped ledger experience. */
+import {Coins, Info, Trophy, Users, Wallet} from 'lucide-react';
+import {money, date} from '../api';
+import {Card, SectionHeading, Metric} from '../shared/ui';
+/** Present the tournament’s financial entries and projected adaptive podium payouts. */
 export function LedgerPage({season, ledger, standings}: {season: any; ledger: any; standings: any[]}) {
   const plan = ledger?.payouts, entries = ledger?.entries ?? [];
   const podium = ['1st', '2nd', '3rd'];

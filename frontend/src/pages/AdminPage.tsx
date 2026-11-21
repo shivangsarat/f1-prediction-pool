@@ -1,8 +1,8 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, Coins, Crown, Database, Flag, FlagTriangleRight, GitBranch, Info, LockKeyhole, LogOut, Menu, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Target, Timer, TrendingUp, Trophy, Users, Wallet, Wifi, X, Zap} from 'lucide-react';
-import {get, post, put, patch, money, date} from '../api';
-import {Card, SectionHeading, Metric, Pill, TextInput, Notice, Select, Action, useCountdown, mkDefault, emptySprint, slug, type Form, type View} from '../shared/ui';
-/** AdminPage renders the tournament-scoped admin experience. */
+import {useEffect, useState} from 'react';
+import {BarChart3, Database, Flag, Plus, RefreshCw, Save, Settings, Shield, ShieldCheck, Trophy} from 'lucide-react';
+import {get, post, put, patch, date} from '../api';
+import {Card, SectionHeading, Pill, TextInput, Notice, Select, Action} from '../shared/ui';
+/** Configure a specific tournament’s seasons, OpenF1 results, immutable scoring, ledgers and audit trail. */
 export function AdminPage({season, seasons, weekends, users, refresh, toast, tournamentId, isOperator}: {season: any; seasons: any[]; weekends: any[]; users: any[]; refresh: () => void; toast: (x: string) => void; tournamentId: string; isOperator: boolean}) {
 
   const [tab, setTab] = useState('setup'), [busy, setBusy] = useState(false), [year, setYear] = useState(String(new Date().getFullYear() + 1)), [sprintMode, setSprintMode] = useState('two-form'), [entry, setEntry] = useState('1000'), [currency, setCurrency] = useState('EUR'), [cutoff1, setCutoff1] = useState('5'), [cutoff2, setCutoff2] = useState('10');
