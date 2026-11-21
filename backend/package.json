@@ -1,0 +1,16 @@
+{
+  "name": "@gridlock/backend",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "engines": { "node": ">=22.16.0" },
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 src/*.test.ts",
+    "lint": "eslint src --max-warnings 0",
+    "format": "prettier --write 'src/**/*.ts' '*.json'",
+    "format:check": "prettier --check 'src/**/*.ts' '*.json'"
+  },
+  "devDependencies": { "eslint": "^9.39.0", "@eslint/js": "^9.39.0", "typescript-eslint": "^8.46.0", "prettier": "^3.6.0" }
+}

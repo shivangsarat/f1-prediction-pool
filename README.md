@@ -1,123 +1,133 @@
 # GRIDLOCK — F1 Prediction Pool
 
-An unofficial, private Formula 1 prediction championship, implemented from **F1 Prediction Pool — System & Rules Design Document v1.0** (archived in [`docs/design-spec.pdf`](docs/design-spec.pdf)).
+A multi-tournament Formula 1 prediction platform based on the finalized [system and scoring specification](docs/design-spec.pdf). Participants can **create a tournament, invite other users, and enter that tournament's own prediction workspace**. Parallel pools can share players without sharing their picks, scores, roles or financial ledgers.
 
-**Stack:** React 19 + TypeScript/Vite UI; Node.js 22 native HTTP API and TypeScript; SQLite in Write-Ahead Logging mode; Docker Compose; OpenF1 ingestion with mandatory commissioner verification.
+This is an unofficial F1 fan project. It **does not accept card payments, process transfers, or hold funds**; commissioners manually record transactions settled elsewhere.
 
-## Quick start (local development)
+## Separated frontend and backend
 
-Requires **Node.js >=22.13** (v22.16+ recommended), npm, and an internet connection to install the React/Vite packages.
+```text
+f1-prediction-pool/
+├── frontend/                  # Standalone React/TypeScript client
+│   ├── src/pages/             # TournamentLobby, TournamentWorkspace, Picks, Rules, Admin...
+│   ├── src/shared/            # Reusable typed UI components
+│   ├── src/*.test.ts          # Client API tests
+│   ├── docker/nginx.conf      # Production static SPA + reverse proxy
+│   ├── Dockerfile
+│   └── package.json           # Independent install, build, lint, tests
+├── backend/                   # Standalone Node.js 22 native HTTP API
+│   ├── src/auth.ts            # Scrypt, HttpOnly sessions, rate limiting
+│   ├── src/tournaments.ts     # Membership & commissioner authorization
+│   ├── src/db.ts              # Durable SQLite WAL + legacy migration
+│   ├── src/http.ts            # Request validation, CSRF, response hardening
+│   ├── src/server.ts          # HTTP routing and race operations
+│   ├── src/rules.ts           # Full official scoring and payout engine
+│   ├── src/openf1.ts          # Provisional race-data import
+│   ├── src/backups.ts         # Encrypted snapshot machinery
+│   ├── src/*.test.ts          # Per-module + end-to-end API tests
+│   ├── Dockerfile
+│   └── package.json
+├── docs/                      # API, security audit, operations and specification
+├── scripts/                   # Offline restore utility
+├── docker-compose.yml        # Two independent service containers
+└── package.json              # Convenience scripts; NOT an npm workspace
+```
+
+There are **no cross-package runtime dependencies**. Each app has its own package manifest and can be developed, tested and deployed independently. `backend/src/rules.ts` is part of the backend rather than a shared workspace package.
+
+## Port configuration
+
+| Process | Default port | Explanation |
+| --- | ---: | --- |
+| Existing live F1 dashboard | **8080** | Leave the existing application unchanged |
+| Gridlock frontend (development) | **5173** | Vite proxies `/api` to port 3001 |
+| Gridlock frontend (production container) | **8080** internally | Set `FRONTEND_PORT` to choose a host port |
+| Gridlock backend API | **3001** | Not directly exposed by Compose |
+| Gridlock frontend when both apps run in production | **8081** on the host | Avoids collision with the live dashboard on 8080 |
+
+**You cannot bind two services to the same host IP and port simultaneously.** In production, either use separate host ports (existing dashboard 8080 / Gridlock 8081), or publish two distinct hostnames from a reverse proxy/Cloudflare Tunnel. With the existing dashboard running, use Gridlock development on port 5173. Frontend `vite preview` uses 8080 and therefore also conflicts on the same interface unless moved.
+
+## Local development
+
+Requires Node.js **22.16+**, npm, and internet access to install React/Vite and test dependencies.
 
 ```bash
 cp .env.example .env
-# Edit .env: set ADMIN_EMAIL and a strong ADMIN_BOOTSTRAP_KEY.
-# Generate optional backup key: openssl rand -hex 32
-npm install
-npm run dev:api          # terminal A -> http://localhost:8080
-npm run dev:web          # terminal B -> http://localhost:5173
-```
+# Leave PUBLIC_ORIGIN empty for local Vite development.
+# Set a random ADMIN_BOOTSTRAP_KEY only if an operator account is needed.
+# Configure a real backup key before production deployment.
 
-Open `http://localhost:5173`; create a commissioner account using the email and bootstrap key from `.env`. The Vite dev server proxies `/api` to port 8080. **Load environment variables from `.env` into the API process** before running `npm run dev:api`: the API reads OS environment variables, not dotenv files. For example:
+npm install --prefix frontend
+npm install --prefix backend
 
-```bash
+# Terminal 1: standalone backend API (port 3001)
 set -a; . ./.env; set +a
-npm run dev:api
+npm run dev --prefix backend
+
+# Terminal 2: standalone Vite frontend (port 5173)
+npm run dev --prefix frontend
 ```
 
-The participant UI allows registration with any other email (12+ character password). Sessions are persisted as SHA-256 hashes of 256-bit bearer tokens in the DB; tokens expire after 7 days. The UI keeps its token in `sessionStorage` (per tab).
+Open `http://localhost:5173`, register an account (password at least 12 characters), and **create your first prediction tournament**. The creator becomes that tournament's commissioner automatically; no global operator key is needed for tournament creation. Copy the one-time invitation code to invite other users. Returning players can join more than one tournament with separate codes.
 
-## One-container deployment (VPS or intermittent local computer)
+Choose a tournament from the lobby to open its **Race HQ, predictions, round leaderboard, season standings, championship picks, rules, prize ledger and commissioner functions**. Each screen makes tournament-authorized API requests, even if someone forges a season ID or edits a URL manually.
+
+Commissioners can create a season, set locks and payout cutoffs, configure rosters/calendars, stage OpenF1 results, preview scoring, publish classifications, and record settled buy-ins. A global operator account is **only** needed for database-wide maintenance backups.
+
+## Production deployment
 
 ```bash
 cp .env.example .env
-# Fill in the secrets and encryption key in .env
+# Generate secrets; enter the same values in .env:
+openssl rand -hex 32   # BACKUP_ENCRYPTION_KEY (mandatory in production)
+openssl rand -hex 32   # ADMIN_BOOTSTRAP_KEY if using a global operator
+# Edit FRONTEND_PORT=8081 when the F1 live dashboard uses 8080.
+# Set PUBLIC_ORIGIN=https://your-gridlock-hostname.example for HTTPS deployment.
 mkdir -p data backups
-# Docker bind mounts must be writable by the container user (uid 1000).
 sudo chown -R 1000:1000 data backups
+
 docker compose up -d --build
 ```
 
-The service binds to `127.0.0.1:8080` on the host. Put **Cloudflare Tunnel**, Caddy/HTTPS, or your chosen reverse proxy in front of it. Don't expose the port directly without TLS. One backend process is sufficient for a small private league; the SQLite database and OpenF1 throttle are process-local for correctness.
+The frontend listens on `127.0.0.1:${FRONTEND_PORT:-8080}` (default 8080; `.env.example` sets **8081** to avoid conflicting with the live dashboard). Nginx sends `/api/*` to the private `backend:3001` container. Protect the public hostname with **HTTPS / Cloudflare Tunnel**; do not directly expose the backend API. In production, cookies have `Secure; HttpOnly; SameSite=Strict`, and the backend requires an encrypted backup key.
 
-**Shutdown-safe:** data resides in `./data` outside the container, using SQLite WAL. Pick deadlines are evaluated against UTC timestamps on *every request*, independent of timers or cron jobs; if the host is offline at qualifying start, a late pick is rejected when it returns. A graceful SIGTERM performs a consistent backup before a WAL checkpoint and shutdown. Published scores also trigger an automatic backup.
+The SQLite files (`pool.sqlite`, `-wal`, `-shm`) live in the mounted `./data` directory; snapshots are saved in `./backups`. Shutdown and published races trigger SQLite-consistent encrypted snapshots. Optional offsite transfer requires an installed and configured rclone destination; this image does **not** bundle rclone.
 
-**Offsite backup:** set `BACKUP_ENCRYPTION_KEY` (32 bytes as 64 hex chars) and configure `BACKUP_RCLONE_REMOTE`, with `rclone` installed on the machine/container and a configured destination (S3/Google Drive supported by rclone). Backups are gzipped and encrypted using AES-256-GCM before upload. If upload is not configured, backups are local only; **local-only backups do not protect against disk failure**. See [Recovery operations](docs/OPERATIONS.md).
+Read [operations and recovery](docs/OPERATIONS.md) before migrating an existing pool or going live.
 
-**Note:** The provided Docker image doesn't ship `rclone`. To enable offsite upload in Docker, build an image that installs rclone and mounts its configured credentials securely, or run a host-side rclone task on the encrypted `./backups` directory. Don't call local-only backups offsite-safe.
+## Multi-tournament design
 
-## Season onboarding (commissioner)
+- Users are registered once, with distinct membership and commissioner permissions **per tournament**.
+- Each tournament can configure its own seasons, including the same calendar year as another tournament.
+- Weekends, submissions, scoring, championship picks, entrant payments, payout projections and audits belong to an authorized tournament through its season.
+- Invitation codes are cryptographically random, stored only as hashes, and invalidated when rotated. A returning member can join another pool without creating a new account.
+- HTTP routes never trust the tournament selected in the browser: the API checks membership for the actual season/weekend being requested. Even the optional global operator role does not bypass this boundary.
+- A preexisting v1 database is migrated into a dedicated **Legacy F1 Pool** tournament. Existing users remain members and previous seasons, submissions and ledger records are retained. **Back up the DB before upgrading.**
 
-1. Register with `ADMIN_EMAIL` and `ADMIN_BOOTSTRAP_KEY` in the signup form.
-2. **Commissioner → Season setup:** create the season, choose `two-form` (default) or `one-form` Sprint mode, fee, currency, and tier cutoffs. Set a one-week August salvage window and pre-season UTC lock.
-3. **Roster:** use an OpenF1 session key to import drivers/constructors, or paste the JSON roster manually. Roster replacement is blocked after any submissions.
-4. **Calendar:** preview/import OpenF1 season schedule or create rounds manually. Each deadline must have an explicit UTC offset, and first round lock must be on/after preseason lock.
-5. **Prize Pool / Commissioner → Buy-ins:** manually record settled buy-ins with idempotency keys. This app **does not charge payment methods or transmit money**.
-6. Participants register, choose a season, submit their predictions, and follow standings.
-7. Once the race classification is available, Commissioner → Race control → Sync OpenF1 or enter JSON. Confirm FIA Pole Award, fastest classified lap, first NC/Retired (ties), green-flag lap count, Sprint top team/grid-delta ties and final classification; **Preview Scores**; then Publish.
-8. After the season's last officially scored race, Commissioner → Champions publishes WDC/WCC results (+25 each).
+## Rules
 
-## Rules implemented
+The signed-off v1.0 scoring mathematics remain unchanged: podium exact +10, midfield exact +5, off-by-one +3, off-by-two +1, additional podium presence +3, 85/96 possible weekly points, Sprint two-form/unified mode, season championship +25 bonuses, August salvage -15 change penalty, and adaptive payout tiers from 2 to 11+ paid participants. The rules are visible inside each tournament and use that tournament's selected season settings.
 
-| Rule | Behaviour |
-| --- | --- |
-| Exact podium P1–P3 | +10 **total** (no bonus stacking) |
-| Exact P4–P10 | +5 |
-| Off by 1 / off by 2 | +3 / +1, even for P10 → P11/P12 |
-| Wrong podium slot but still top three | +3 extra on top of proximity (up to 6) |
-| Standard props | Pole +5; official fastest classified lap +5; first official NC/Retired +10 (Lap-1 ties) |
-| Sprint props | Sprint winner +5; highest-scoring team +3 (ties); most Sprint places gained +3 (ties) |
-| Sprint forms | Default Sprint and GP forms at separate locks, optional unified form at Sprint Qualifying lock; configuration freezes at first Round 1 lock |
-| WDC/WCC | +25 each; August salvage edits −15 per changed category, applied after window closes |
-| Missed submissions | 0 for missed form; GP remains eligible if Sprint form missed in two-form mode |
-| Race cancellation | 0 for full cancellations or fewer than 2 green-flag laps |
-| Result freeze | Official final race classification or 24 hours after chequered flag; published scores are immutable |
-| Pool tiers | 2–3 winner-takes-all; 4–5 top-two 75/25; 6–10 third-entry refund plus 75/25 remainder; 11+ 65/25/10 |
-| Partial buy-in | Caps individual payout to proportion paid; difference redistributed to fully-paid prize recipients, if available |
-| Season ranking | Total points → exact podiums → exact Top 10s → cumulative props → best weekend → equal split |
+OpenF1 imports only **draft** classifications; a commissioner must verify FIA results, run a scoring preview and explicitly publish. The real-money ledger is bookkeeping only. Scheduled lock checks are evaluated on every request against server UTC timestamps, not background timers. Check [API details](docs/API.md) and the [original specification](docs/design-spec.pdf) for exact edge cases.
 
-Tests assert all of the document's worked payout rows and the 85/96 theoretical maxima.
-
-## Architecture
-
-```text
-              Browser (React + TypeScript)
-                        │ HTTPS
-                  Reverse proxy
-                        │
-                 Node.js API :8080
-         ┌──────────────┼──────────────┐
-       Auth         Rules engine      OpenF1 adapter
-         │              │                 │
-         └────── SQLite WAL ──────────────┘
-                    persistent volume
-                        │
-           encrypted optional rclone backup
-```
-
-Monorepo layout:
-
-- `apps/web`: participant/admin portal
-- `apps/api`: auth, SQLite persistence, HTTP endpoints, reconciliation, OpenF1 adapter, backups
-- `packages/core`: pure rules/scoring and adaptive payout functions
-- `docs`: archived specification, operational runbook, API notes
-- `scripts`: offline backup restoration
-- `.github/workflows`: automated tests and frontend build
-
-## Validation
+## Tests, lint and formatting
 
 ```bash
-npm test           # core rules + SQLite/HTTP integration tests (no dependencies to install)
-npm run build      # requires npm install (React/Vite dependencies)
+npm test                             # Both projects
+npm run lint                         # ESLint, separate per project
+npm run format                       # Prettier, separate per project
+npm run format:check                 # Verify formatting
+npm run build                        # Frontend TypeScript + production bundle
+npm test --prefix backend            # Node test runner (pure rules + module tests + HTTP integration)
+npm test --prefix frontend           # Vitest DOM/component tests
 ```
 
-**Development status:** scoring, authenticated API, participant/admin UI source, SQLite integration, and tests are implemented. The native API and tests have been run. The React/Vite build has **not** been executed in the sandbox (the sandbox lacks npm registry access), so the frontend build must be validated after `npm install` or by the included GitHub Action. Production readiness additionally requires HTTPS/reverse-proxy hardening, configured offsite backups and user acceptance testing with a real race calendar. Managed PostgreSQL deployments are not part of this initial SQLite implementation.
+Named functions and components have `/** ... */` descriptions, and shared UI elements are extracted into reusable modules. The GitHub Actions workflow installs and tests the frontend/backend independently and validates the frontend build.
 
-## Important cautions
+**Local validation:** The backend Node test suite is runnable without installing third-party packages, and currently passes locally. The frontend build and Vitest/ESLint runs require npm dependencies and must be checked via GitHub Actions or a normal development machine; they could not be executed in the isolated implementation environment.
 
-- The document's payouts describe an informal pool; confirm local rules and payment/legal requirements before involving real entry fees.
-- The OpenF1 API is **independent of FIA and Formula 1**. Its output is used only to populate a provisional admin draft. Official classifications require commissioner verification. See [OpenF1 documentation](https://openf1.org/docs/).
-- Race-day OpenF1 datasets may be delayed or rate limited. The platform serializes requests around 2.1 seconds apart within a single API process; don't start multiple separate API instances with the same database without a shared throttle.
-- Race cancellation, appeals, manual fallback, and financial transfers require responsible commissioner review and audit notes.
-- Conflicting edge case: proportional payout caps can cause a lower rank to *receive more* than a prorated higher rank; the design's monotonicity guarantee and hard prorating cap cannot both hold in every case. This implementation enforces contribution caps and cash solvency over absolute payout monotonicity. If every eligible recipient is prorated, some funds may remain undistributed and are clearly reported, rather than exceeding the caps.
+## Security and limitations
 
-Unofficial educational fan project, not affiliated with Formula 1, FIA, or FOM.
+Review [security audit and residual risks](docs/SECURITY.md) before adding real participants or recorded money. Principal protections include salted scrypt password hashes, 256-bit random persisted sessions, HttpOnly/SameSite cookies, same-origin CSRF checks, persisted abuse throttles, tournament authorization on every scope, atomic and idempotent ledger writes, excluded private ledger keys, and encrypted snapshots in production.
+
+**Not yet a payment platform:** It does not collect, transmit, verify or distribute actual money. Commissioners must reconcile every external payment and comply with local law before using entry fees. Financial record correctness depends on trusted commissioners and source reconciliation.

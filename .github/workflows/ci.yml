@@ -1,16 +1,27 @@
-name: Test & build
+name: Backend and frontend checks
 on:
   push:
     branches: [main]
   pull_request:
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
-      - run: npm install --no-audit --no-fund
-      - run: npm test
-      - run: npm run build
+      - run: npm install --prefix backend --no-audit --no-fund
+      - run: npm run lint --prefix backend
+      - run: npm run test --prefix backend
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm install --prefix frontend --no-audit --no-fund
+      - run: npm run lint --prefix frontend
+      - run: npm run test --prefix frontend
+      - run: npm run build --prefix frontend

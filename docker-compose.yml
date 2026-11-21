@@ -1,23 +1,38 @@
 services:
-  pool:
-    build: .
+  backend:
+    build: ./backend
     restart: unless-stopped
     init: true
     stop_grace_period: 90s
-    ports:
-      - '127.0.0.1:8080:8080'
-    env_file:
-      - .env
+    env_file: .env
     environment:
-      PORT: '8080'
+      API_PORT: '3001'
       HOST: '0.0.0.0'
       DB_PATH: /app/data/pool.sqlite
       BACKUP_DIR: /app/backups
+      NODE_ENV: production
+      TRUST_PROXY: '1'
+    expose:
+      - '3001'
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups
     read_only: true
     tmpfs:
       - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '127.0.0.1:${FRONTEND_PORT:-8080}:8080'
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
     security_opt:
       - no-new-privileges:true

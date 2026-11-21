@@ -1,0 +1,190 @@
+import {DatabaseSync, backup} from 'node:sqlite';
+import {mkdirSync} from 'node:fs';
+import {dirname, resolve} from 'node:path';
+import {randomUUID} from 'node:crypto';
+
+export const dbPath = resolve(process.env.DB_PATH ?? './data/pool.sqlite');
+mkdirSync(dirname(dbPath), {recursive: true});
+export const db = new DatabaseSync(dbPath);
+db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
+CREATE TABLE IF NOT EXISTS tournaments (
+ id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',
+ owner_id TEXT REFERENCES users(id),invite_hash TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tournament_members (
+ tournament_id TEXT NOT NULL REFERENCES tournaments(id),user_id TEXT NOT NULL REFERENCES users(id),
+ role TEXT NOT NULL CHECK(role IN ('commissioner','player')),joined_at TEXT NOT NULL,
+ PRIMARY KEY(tournament_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS auth_attempts (
+ key_hash TEXT NOT NULL,occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_attempts ON auth_attempts(key_hash,occurred_at); 
+CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,
+ password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'participant',created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS seasons (
+ id TEXT PRIMARY KEY,year INTEGER NOT NULL,name TEXT NOT NULL,tournament_id TEXT NOT NULL REFERENCES tournaments(id),sprint_mode TEXT NOT NULL DEFAULT 'two-form',
+ currency TEXT NOT NULL DEFAULT 'EUR',base_entry_cents INTEGER NOT NULL DEFAULT 1000,small_max INTEGER NOT NULL DEFAULT 5,
+ medium_max INTEGER NOT NULL DEFAULT 10,preseason_lock TEXT NOT NULL,salvage_start TEXT NOT NULL,salvage_end TEXT NOT NULL,
+ created_at TEXT NOT NULL,UNIQUE(tournament_id,year)
+);
+CREATE TABLE IF NOT EXISTS roster (
+ season_id TEXT NOT NULL REFERENCES seasons(id),id TEXT NOT NULL,name TEXT NOT NULL,
+ code TEXT NOT NULL,team_id TEXT NOT NULL,team_name TEXT NOT NULL,PRIMARY KEY(season_id,id)
+);
+CREATE TABLE IF NOT EXISTS weekends (
+ id TEXT PRIMARY KEY,season_id TEXT NOT NULL REFERENCES seasons(id),round INTEGER NOT NULL,
+ name TEXT NOT NULL,is_sprint INTEGER NOT NULL DEFAULT 0,qualifying_at TEXT NOT NULL,
+ sprint_qualifying_at TEXT,race_at TEXT NOT NULL,chequered_at TEXT,
+ openf1_keys TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL, UNIQUE(season_id,round)
+);
+CREATE TABLE IF NOT EXISTS submissions (
+ id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),weekend_id TEXT NOT NULL REFERENCES weekends(id),
+ form TEXT NOT NULL,payload TEXT NOT NULL,version INTEGER NOT NULL,submitted_at TEXT NOT NULL,
+ source TEXT NOT NULL DEFAULT 'web',audit_note TEXT, UNIQUE(user_id,weekend_id,form,version)
+);
+CREATE TABLE IF NOT EXISTS results (
+ weekend_id TEXT PRIMARY KEY REFERENCES weekends(id),payload TEXT NOT NULL,source TEXT NOT NULL,
+ version INTEGER NOT NULL,final_classification INTEGER NOT NULL DEFAULT 0,published_at TEXT,published_hash TEXT,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS score_snapshots (
+ id TEXT PRIMARY KEY,weekend_id TEXT NOT NULL REFERENCES weekends(id),user_id TEXT NOT NULL REFERENCES users(id),
+ result_version INTEGER NOT NULL,points INTEGER NOT NULL,exact_podiums INTEGER NOT NULL,exact_top10 INTEGER NOT NULL,
+ prop_points INTEGER NOT NULL,breakdown TEXT NOT NULL,created_at TEXT NOT NULL,
+ UNIQUE(weekend_id,user_id,result_version)
+);
+CREATE TABLE IF NOT EXISTS scoring_previews (
+ weekend_id TEXT PRIMARY KEY REFERENCES weekends(id),digest TEXT NOT NULL,created_at TEXT NOT NULL,reviewer_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS champion_picks (
+ id TEXT PRIMARY KEY,season_id TEXT NOT NULL REFERENCES seasons(id),user_id TEXT NOT NULL REFERENCES users(id),
+ category TEXT NOT NULL,choice TEXT NOT NULL,phase TEXT NOT NULL,submitted_at TEXT NOT NULL,version INTEGER NOT NULL,
+ UNIQUE(season_id,user_id,category,version)
+);
+CREATE TABLE IF NOT EXISTS champions (
+ season_id TEXT PRIMARY KEY REFERENCES seasons(id),wdc TEXT NOT NULL,wcc TEXT NOT NULL,
+ published_at TEXT NOT NULL,submitted_by TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ledger (
+ id TEXT PRIMARY KEY,season_id TEXT NOT NULL REFERENCES seasons(id),user_id TEXT REFERENCES users(id),
+ type TEXT NOT NULL,amount_cents INTEGER NOT NULL,description TEXT NOT NULL,idempotency_key TEXT NOT NULL UNIQUE,
+ created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit (
+ id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,action TEXT NOT NULL,entity_id TEXT NOT NULL,
+ note TEXT,details TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,tournament_id TEXT REFERENCES tournaments(id)
+);
+CREATE INDEX IF NOT EXISTS idx_picks ON submissions(weekend_id,user_id,form,version DESC);
+CREATE INDEX IF NOT EXISTS idx_score ON score_snapshots(weekend_id,user_id,result_version DESC);
+CREATE INDEX IF NOT EXISTS idx_audit ON audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger ON ledger(season_id,created_at DESC);
+`);
+
+/** Migrate a single-pool v1 database without discarding scores, picks, or financial history. */
+export function migrateLegacyDatabase(): void {
+
+  const columns = db.prepare('PRAGMA table_info(seasons)').all() as Array<{name: string}>;
+  if (columns.some(column => column.name === 'tournament_id')) {
+
+    const auditColumns = db.prepare('PRAGMA table_info(audit)').all() as Array<{name: string}>;
+    if (!auditColumns.some(column => column.name === 'tournament_id')) db.exec('ALTER TABLE audit ADD COLUMN tournament_id TEXT REFERENCES tournaments(id)');
+    return;
+  }
+  const owner = db.prepare("SELECT id FROM users ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END,created_at LIMIT 1").get() as {id: string} | undefined;
+  const legacyId = randomUUID(), now = new Date().toISOString();
+  // Rebuild is required to remove the original global UNIQUE(year) constraint.
+  db.exec('PRAGMA foreign_keys=OFF');
+  try {
+
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare('INSERT INTO tournaments(id,name,description,owner_id,invite_hash,created_at) VALUES(?,?,?,?,?,?)').run(legacyId, 'Legacy F1 Pool', 'Imported from the single-pool schema', owner?.id ?? null, randomUUID(), now);
+    db.exec(`CREATE TABLE seasons_new (
+   id TEXT PRIMARY KEY,year INTEGER NOT NULL,name TEXT NOT NULL,
+   tournament_id TEXT NOT NULL REFERENCES tournaments(id),sprint_mode TEXT NOT NULL DEFAULT 'two-form',
+   currency TEXT NOT NULL DEFAULT 'EUR',base_entry_cents INTEGER NOT NULL DEFAULT 1000,
+   small_max INTEGER NOT NULL DEFAULT 5,medium_max INTEGER NOT NULL DEFAULT 10,
+   preseason_lock TEXT NOT NULL,salvage_start TEXT NOT NULL,salvage_end TEXT NOT NULL,
+   created_at TEXT NOT NULL,UNIQUE(tournament_id,year)
+  );`);
+    db.prepare(`INSERT INTO seasons_new (id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at)
+    SELECT id,year,name,?,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at FROM seasons`).run(legacyId);
+    db.exec('DROP TABLE seasons; ALTER TABLE seasons_new RENAME TO seasons;');
+    if (owner) {
+
+      db.prepare("INSERT INTO tournament_members SELECT ?,id,CASE WHEN role='admin' THEN 'commissioner' ELSE 'player' END,? FROM users").run(legacyId, now);
+    }
+    db.exec('ALTER TABLE audit ADD COLUMN tournament_id TEXT REFERENCES tournaments(id)');
+    db.prepare('UPDATE audit SET tournament_id=? WHERE entity_id IN (SELECT id FROM seasons UNION SELECT id FROM weekends UNION SELECT id FROM ledger)').run(legacyId);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  finally {
+    db.exec('PRAGMA foreign_keys=ON')
+  }
+  const fkErrors = db.prepare('PRAGMA foreign_key_check').all();
+  if (fkErrors.length) throw Error('Legacy migration has unresolved foreign keys');
+}
+migrateLegacyDatabase();
+
+export type Row = Record<string, any>;
+/**
+ * Get the first SQLite row matching a parameterized query, or undefined.
+ * @param sql - Input to this operation.
+ * @param args - Input to this operation.
+ */
+export function get(sql: string, ...args: any[]): Row | undefined {
+  return db.prepare(sql).get(...args) as Row | undefined
+}
+/**
+ * Read every SQLite row matching a parameterized query.
+ * @param sql - Input to this operation.
+ * @param args - Input to this operation.
+ */
+export function all(sql: string, ...args: any[]): Row[] {
+  return db.prepare(sql).all(...args) as Row[]
+}
+/**
+ * Execute a parameterized SQL statement that mutates persistent storage.
+ * @param sql - Input to this operation.
+ * @param args - Input to this operation.
+ */
+export function run(sql: string, ...args: any[]) {
+  return db.prepare(sql).run(...args)
+}
+/**
+ * Execute synchronous database work in an atomic IMMEDIATE transaction; roll back on error.
+ * @param fn - Input to this operation.
+ */
+export function transaction<T>(fn: () => T): T {
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const value = fn();
+    db.exec('COMMIT');
+    return value
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err
+  }
+}
+/**
+ * Parse a JSON column from a database record.
+ * @param row - Input to this operation.
+ * @param field - Input to this operation.
+ */
+export const json = (row: any, field: string) => JSON.parse(row[field]);
+/**
+ * Write an online SQLite backup and checkpoint WAL pages without data loss.
+ * @param destination - Input to this operation.
+ */
+export async function checkpointBackup(destination: string) {
+  mkdirSync(dirname(destination), {recursive: true});
+  await backup(db, destination);
+  db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+}
