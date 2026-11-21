@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import {Activity, ArrowLeft, ChevronRight, Crown, FlagTriangleRight, Info, LogOut, Menu, Shield, Target, Trophy, Users, Wallet, X, BookOpen} from 'lucide-react';
+import {Activity, ArrowLeft, ChevronRight, Crown, Info, LogOut, Menu, Shield, Target, Trophy, Users, Wallet, X, BookOpen} from 'lucide-react';
 import {get, post} from '../api';
 import {Action, Card, Notice, type View} from '../shared/ui';
 import {Overview} from './Overview';
@@ -127,7 +127,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
 
   return <div className="app-shell">
     <aside className={'sidebar ' + (navOpen ? 'open' : '')}>
-      <div className="brand"><FlagTriangleRight size={28} /><strong>GRID<span>LOCK</span></strong><button className="nav-close" onClick={() => setNavOpen(false)} aria-label="Close navigation"><X size={20} /></button></div>
+      <div className="brand"><img src="/gridlock-flag.svg" width="28" height="28" alt="GRIDLOCK flag"/><strong>GRID<span>LOCK</span></strong><button className="nav-close" onClick={() => setNavOpen(false)} aria-label="Close navigation"><X size={20} /></button></div>
       <div className="sidebar-group"><div className="sidebar-caption">{tournament.name}</div>
         <button className="nav-item" onClick={onExit}><ArrowLeft size={18} /> All tournaments</button>
         <nav>{NAV.filter(item => item.key !== 'admin' || commissioner).map(({key, label, icon: Icon}) => <button key={key} className={'nav-item ' + (view === key ? 'active' : '')} onClick={() => navigate(key)}>
@@ -145,7 +145,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
       </select><div className="top-avatar">{user.display_name.slice(0, 2).toUpperCase()}</div></div></header>
       <div className="page-content">
         {error && <Notice kind="error">{error}</Notice>}
-        {!season && view !== 'admin' ? <Card><div className="welcome-empty"><FlagTriangleRight size={42} /><h2>No season configured yet</h2>
+        {!season && view !== 'admin' ? <Card><div className="welcome-empty"><img src="/gridlock-flag.svg" width="42" height="42" alt=""/><h2>No season configured yet</h2>
           <p>This tournament is ready. Its commissioner can create a season and configure the driver roster and calendar.</p>
           {commissioner && <Action onClick={() => navigate('admin')}>Open commissioner setup</Action>}
         </div></Card> : <>
@@ -166,7 +166,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
               void reloadMembers()
             }} toast={toast} tournamentId={tournament.id} isOperator={user.role === 'admin'} />
         </>}
-        <footer className="footer"><div><FlagTriangleRight size={16} /> GRIDLOCK <span>{managedTournament.name}</span></div><span>Unofficial fan project. Not affiliated with Formula 1 or FIA.</span></footer>
+        <footer className="footer"><div><img src="/gridlock-flag.svg" width="16" height="16" alt=""/> GRIDLOCK <span>{managedTournament.name}</span></div><span>Unofficial fan project. Not affiliated with Formula 1 or FIA.</span></footer>
       </div>
     </main>
     {toastText && <div className="toast" role="status"><Info size={18} />{toastText}<button onClick={() => setToastText('')} aria-label="Dismiss"><X size={15} /></button></div>}

@@ -190,3 +190,11 @@ The **[Production Support Centre](docs/production/README.md)** contains the [ope
 **As-built hosting:** one OCI Always Free ARM64 Ubuntu VM; Caddy terminates HTTPS and routes GRIDLOCK to `127.0.0.1:8081` and the independently deployed F1 telemetry dashboard to `127.0.0.1:8080`. The GRIDLOCK backend stays on private Docker port 3001, with SQLite and encrypted backup bind mounts on the host. The Compose host-port fallback is now `8081` to avoid colliding with telemetry; explicitly set `FRONTEND_PORT=8081` in the host's private `.env`.
 
 **Deployment is opt-in.** [GitHub Actions production deployment](.github/workflows/deploy-production.yml) is manual-only and requires separately configured SSH secrets and environment approval. The [guarded deploy script](scripts/production/deploy-gridlock.sh) requires an externalized `.env` symlink; see the [one-time secret migration guide](docs/production/DEPLOYMENT.md). No live VM, DNS, OAuth, firewall or cloud account was modified by this documentation release.
+
+## Clear settings, info help and security hardening
+
+The UI now uses clearer field names and an accessible **info** button beside settings, toggles and prediction props. Click it for an exact explanation; underlying API property names have not changed. The original-style scalable flag is provided as `frontend/public/gridlock-flag.svg` and used for the browser favicon.
+
+See [field and toggle guide](docs/UX_FIELD_GUIDE.md) and the [21 November 2026 security review](docs/SECURITY_REVIEW_2026-11-21.md).
+
+**Production upgrade note:** Backend startup now requires `PUBLIC_ORIGIN` to be the configured **HTTPS origin** (no path, query or user credentials). If mail is enabled, `APP_PUBLIC_URL` must match it. Set both before updating your running VM. Global operator bootstrap keys must contain at least **32 characters**.

@@ -13,6 +13,24 @@ import {ensureSeasonRoster, listSeasonRoster, markManualRoster} from './rosterSy
 import {platformPolicy, updatePlatformPolicy, seasonFinanceConfig, snapshotFinance, financeProjection, tournamentTerms, validateSeasonFinanceChanges} from './financeStore.ts';
 import {openingQualifying, midseasonPreview, scaledSeasonPoints, validateMidseasonConfiguration, validateSalvageWindow} from './midseason.ts';
 
+/** Reject unsafe production configuration before accepting any authenticated requests. */
+export function validateProductionConfig(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV !== 'production') return;
+  let origin: URL;
+  try {
+    origin = new URL(env.PUBLIC_ORIGIN ?? '');
+  } catch {
+    throw new Error('Production requires PUBLIC_ORIGIN set to the public HTTPS origin');
+  }
+  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
+    throw new Error('PUBLIC_ORIGIN must be an HTTPS origin without credentials, path or query');
+  }
+  if (env.MAIL_PROVIDER && env.MAIL_PROVIDER !== 'none' && (env.APP_PUBLIC_URL ?? '') !== origin.origin) {
+    throw new Error('APP_PUBLIC_URL must match PUBLIC_ORIGIN exactly when production email is enabled');
+  }
+}
+validateProductionConfig();
+
 // A production instance must be able to make encrypted backups before accepting payments or picks.
 if (process.env.NODE_ENV === 'production' && !/^[a-fA-F0-9]{64}$/.test(process.env.BACKUP_ENCRYPTION_KEY ?? '')) {
 

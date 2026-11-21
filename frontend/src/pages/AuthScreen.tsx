@@ -1,5 +1,5 @@
 import {useState, type FormEvent} from 'react';
-import {ArrowRight, FlagTriangleRight, Globe2} from 'lucide-react';
+import {ArrowRight, Globe2} from 'lucide-react';
 import {post} from '../api';
 import {Action, Notice, TextInput} from '../shared/ui';
 
@@ -36,7 +36,7 @@ export function AuthScreen({onLogin, invitation = false, onBrowse = () => {}}: {
   return <div className="auth-shell">
     <div className="auth-decoration">
       <div className="race-stripes"/>
-      <div className="auth-brand"><FlagTriangleRight size={36}/><span>GRID<span className="red-text">LOCK</span></span></div>
+      <div className="auth-brand"><img src="/gridlock-flag.svg" width="36" height="36" alt="GRIDLOCK flag"/><span>GRID<span className="red-text">LOCK</span></span></div>
       <div className="auth-hero"><span className="eyebrow">YOUR SEASON. YOUR CALL.</span>
         <h1>Every lap.<br/>Every point.<br/><em>Every prediction.</em></h1>
         <p>Run your own Formula 1 tournament, join friends, or discover a public competition.</p>

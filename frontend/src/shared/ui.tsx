@@ -1,4 +1,5 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useId, useState} from 'react';
+import {explainField} from './fieldExplanations';
 import {CheckCircle2, Info, RefreshCw} from 'lucide-react';
 
 export type View = 'overview' | 'picks' | 'standings' | 'ledger' | 'championship' | 'rules' | 'admin';
@@ -46,9 +47,25 @@ export function Card({children, className = ''}: {children: React.ReactNode; cla
 export function Select({value, onChange, options, placeholder = 'Select...', disabled = false}: {value: string; onChange: (x: string) => void; options: {value: string; label: string}[]; placeholder?: string; disabled?: boolean}) {
   return <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)}><option value="" disabled>{placeholder}</option>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
 }
+/** Clickable, keyboard-accessible explanation for one configuration value or switch. */
+export function FieldHelp({label, detail}: {label: string; detail: string}) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return <span className="field-help">
+    <button type="button" className="field-help-trigger" aria-label={`About ${label}`}
+      aria-expanded={open} aria-controls={id} title={`What is ${label}?`}
+      onClick={event => {event.preventDefault(); event.stopPropagation(); setOpen(value => !value);}}
+      onKeyDown={event => {if (event.key === 'Escape') {event.stopPropagation(); setOpen(false);}}}>
+      <Info size={15} aria-hidden="true" />
+    </button>
+    {open && <span id={id} className="field-help-content" role="status">{detail}</span>}
+  </span>;
+}
 /** Render a labeled controlled input field. */
-export function TextInput({label, value, onChange, placeholder = '', type = 'text', disabled = false}: {label: string; value: string; onChange: (x: string) => void; placeholder?: string; type?: string; disabled?: boolean}) {
-  return <label className="input-label">{label}<input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} type={type} disabled={disabled} /></label>
+export function TextInput({label, value, onChange, placeholder = '', type = 'text', disabled = false, help}: {label: string; value: string; onChange: (x: string) => void; placeholder?: string; type?: string; disabled?: boolean; help?: string}) {
+  const field = explainField(label);
+  const id = useId();
+  return <div className="input-label"><span className="field-caption"><label htmlFor={id}>{field.name}</label><FieldHelp label={field.name} detail={help ?? field.detail}/></span><input id={id} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} type={type} disabled={disabled}/></div>;
 }
 /** Render a consistent form or toolbar action with loading state. */
 export function Action({children, onClick, disabled = false, kind = 'primary', loading = false, type = 'button'}: {children: React.ReactNode; onClick?: () => void; disabled?: boolean; kind?: 'primary' | 'outline' | 'ghost' | 'danger'; loading?: boolean; type?: 'submit' | 'button'}) {

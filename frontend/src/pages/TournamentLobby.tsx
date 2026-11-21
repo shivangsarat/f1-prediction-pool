@@ -1,8 +1,8 @@
 import {useState, type FormEvent} from 'react';
-import {ArrowRight, Check, FlagTriangleRight, Globe2, LogOut, Plus, Shield, Users} from 'lucide-react';
+import {ArrowRight, Check, Globe2, LogOut, Plus, Shield, Users} from 'lucide-react';
 import {post} from '../api';
 import {MidseasonLaunchFields, type LaunchFields} from '../components/MidseasonLaunchFields';
-import {Action, Card, Notice, TextInput} from '../shared/ui';
+import {Action, Card, Notice, TextInput, FieldHelp} from '../shared/ui';
 import {InvitationsPanel} from '../components/InvitationsPanel';
 import {NotificationSettings} from '../components/NotificationSettings';
 import {OperatorMailPanel} from '../components/OperatorMailPanel';
@@ -60,7 +60,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
 
   return <div className="tournament-lobby">
     <header className="lobby-header">
-      <div className="brand"><FlagTriangleRight size={28}/><strong>GRID<span>LOCK</span></strong></div>
+      <div className="brand"><img src="/gridlock-flag.svg" width="28" height="28" alt="GRIDLOCK flag"/><strong>GRID<span>LOCK</span></strong></div>
       <div className="lobby-user"><span>{user.display_name} {user.username ? `(@${user.username})` : ''}</span><Action kind="ghost" onClick={onSignOut}><LogOut size={17}/> Sign out</Action></div>
     </header>
     <main className="lobby-main">
@@ -72,18 +72,18 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
       <InvitationsPanel onAccepted={accepted}/>
       <section className="lobby-tournaments" aria-label="My tournaments">
         {tournaments.length ? tournaments.map(t => <button className="tournament-tile" key={t.id} onClick={() => onOpen(t)}>
-          <div className="tile-icon"><FlagTriangleRight size={26}/></div>
+          <div className="tile-icon"><img src="/gridlock-flag.svg" width="26" height="26" alt=""/></div>
           <span className="eyebrow">{t.role === 'operator' ? 'PLATFORM OPERATOR' : t.role === 'commissioner' ? 'COMMISSIONER' : 'PARTICIPANT'} · {t.visibility === 'public' ? 'PUBLIC' : 'INVITE ONLY'} · {t.launch_opening_round && t.launch_opening_round > 1 ? `MID-SEASON R${t.launch_opening_round}` : 'FULL SEASON'} · {t.status?.toUpperCase()}</span>
           <h2>{t.name}</h2><p>{t.description || 'F1 prediction championship'}</p>
           <div className="tile-bottom"><span><Users size={15}/>{t.memberCount} members</span><span>Enter tournament <ArrowRight size={16}/></span></div>
-        </button>) : <Card><div className="welcome-empty"><FlagTriangleRight size={36}/><h2>No tournaments yet</h2><p>Create one, accept a private invitation, or explore the public catalogue.</p></div></Card>}
+        </button>) : <Card><div className="welcome-empty"><img src="/gridlock-flag.svg" width="36" height="36" alt="GRIDLOCK flag"/><h2>No tournaments yet</h2><p>Create one, accept a private invitation, or explore the public catalogue.</p></div></Card>}
       </section>
       <div className="lobby-forms">
         <Card><form onSubmit={create}><h2><Plus size={20}/> Create a tournament</h2><p className="muted">You become commissioner and control this tournament's rules and financial ledger.</p>
           <TextInput label="TOURNAMENT NAME" value={name} onChange={setName} placeholder="2027 Friends Championship"/>
           <TextInput label="DESCRIPTION (OPTIONAL)" value={description} onChange={setDescription} placeholder="Weekend prediction challenge"/>
           <MidseasonLaunchFields value={launch} onChange={setLaunch}/>
-          <label className="input-label">WHO CAN FIND IT?<select value={visibility} aria-label="Tournament visibility" onChange={event => setVisibility(event.target.value as 'public' | 'invite_only')}>
+          <label className="input-label">Tournament access <FieldHelp label="Tournament access" detail="Public tournaments appear in the catalogue and can also use invitations. Invite-only tournaments require a link or a direct invite."/><select value={visibility} aria-label="Tournament visibility" onChange={event => setVisibility(event.target.value as 'public' | 'invite_only')}>
             <option value="invite_only">Invite only — hidden from the public catalogue</option>
             <option value="public">Public — listed and open to join</option>
           </select></label>

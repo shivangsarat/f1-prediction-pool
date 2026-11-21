@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react';
-import {Action, Card, Metric, Notice, Pill, Select, TextInput, emptySprint, mkDefault, slug} from './ui';
+import {Action, Card, FieldHelp, Metric, Notice, Pill, Select, TextInput, emptySprint, mkDefault, slug} from './ui';
 
 afterEach(cleanup);
 
@@ -51,4 +51,27 @@ describe('shared controls', () => {
     fireEvent.click(screen.getByRole('button', {name: 'Commit'}));
     expect(click).not.toHaveBeenCalled();
   });
+});
+
+/** Help is opt-in, accessible, and dismissible without mutating the field. */
+it('opens and closes an accessible field explanation on request', () => {
+  render(<TextInput label="BASE ENTRY (CENTS)" value="1000" onChange={vi.fn()} />);
+  const trigger = screen.getByRole('button', {name: /About Entry fee/i});
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByRole('status').textContent).toContain('1000 cents means');
+  fireEvent.click(trigger);
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+/** A help trigger on a toggle should never accidentally toggle the parent checkbox. */
+it('explains a toggle without changing its state', () => {
+  const onChange = vi.fn();
+  render(<label><input type="checkbox" onChange={onChange}/>Charge a fee
+    <FieldHelp label="Fee" detail="Fee deducted from buy-ins."/>
+  </label>);
+  fireEvent.click(screen.getByRole('button', {name: 'About Fee'}));
+  expect(screen.getByText('Fee deducted from buy-ins.')).toBeTruthy();
+  expect(onChange).not.toHaveBeenCalled();
 });

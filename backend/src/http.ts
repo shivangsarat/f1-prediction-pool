@@ -7,7 +7,7 @@ import {get, run} from './db.ts';
 /** Parse a JSON request body with a strict 256 KiB size limit. */
 export async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
 
-  if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+  if (!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers['content-type'] ?? ''))) {
 
     throw new HttpError(415, 'Content-Type must be application/json');
   }
@@ -95,6 +95,16 @@ export function jsonDigest(json: string): string {
   return createHash('sha256').update(json).digest('hex')
 }
 
+/** Accept forwarded identity only from loopback or RFC1918 Docker peers, never direct public clients. */
+export function trustedProxyPeer(address: string): boolean {
+  if (address === '::1' || address === '127.0.0.1') return true;
+  const ip = address.startsWith('::ffff:') ? address.slice(7) : address;
+  if (isIP(ip) !== 4) return false;
+  const parts = ip.split('.').map(Number);
+  return parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168) || parts[0] === 127;
+}
+
 /**
  * Resolve the real client address for abuse controls. Trust X-Real-IP only behind
  * the private nginx proxy, which overwrites this field for incoming requests.
@@ -104,6 +114,6 @@ export function clientIp(req: IncomingMessage): string {
 
   const direct = req.socket.remoteAddress ?? 'unknown';
   const forwarded = req.headers['x-real-ip'];
-  if (process.env.TRUST_PROXY === '1' && typeof forwarded === 'string' && isIP(forwarded)) return forwarded;
+  if (process.env.TRUST_PROXY === '1' && typeof forwarded === 'string' && isIP(forwarded) && trustedProxyPeer(direct)) return forwarded;
   return direct;
 }

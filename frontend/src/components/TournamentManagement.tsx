@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {Copy, Globe2, LockKeyhole, Search, Shield, UserPlus} from 'lucide-react';
 import {get, patch, post} from '../api';
-import {Action, Card, Notice, TextInput} from '../shared/ui';
+import {Action, Card, Notice, TextInput, FieldHelp} from '../shared/ui';
 import type {Tournament} from '../pages/TournamentLobby';
 
 /** Minimal username directory record (email addresses are not exposed). */
@@ -63,11 +63,11 @@ export function TournamentManagement({tournament, onChanged}: {
     <Card><h3><Shield size={18}/> Tournament settings</h3>
       <TextInput label="NAME" value={name} onChange={setName}/>
       <TextInput label="DESCRIPTION" value={description} onChange={setDescription}/>
-      <label className="field-label">VISIBILITY</label>
+      <label className="field-label">Who can join? <FieldHelp label="Who can join?" detail="Public competitions appear in the catalogue and accept invitations. Invite-only competitions are hidden and require an invite link or invitation."/></label>
       <select aria-label="Tournament visibility" value={visibility} onChange={e => setVisibility(e.target.value as Tournament['visibility'])}>
         <option value="invite_only">Invite-only — hidden from catalogue</option><option value="public">Public — visible to everyone</option>
       </select>
-      <label className="field-label">STATUS</label>
+      <label className="field-label">Tournament availability <FieldHelp label="Tournament availability" detail="Active pools accept eligible entries. Archived pools stay visible to members but do not accept new participants."/></label>
       <select aria-label="Tournament status" value={status} onChange={e => setStatus(e.target.value as Tournament['status'])}>
         <option value="active">Active</option><option value="archived">Archived — no new entrants</option>
       </select>

@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useState} from 'react';
-import {FlagTriangleRight} from 'lucide-react';
 import {get, post} from './api';
 import {AuthScreen} from './pages/AuthScreen';
 import {TournamentCatalogue, type PublicTournament} from './pages/TournamentCatalogue';
@@ -113,7 +112,7 @@ export function App() {
     setActive(null); removeUrlParameter('tournament'); void refresh();
   }
 
-  if (loading) return <div className="splash"><FlagTriangleRight size={40}/><strong>GRIDLOCK</strong><span>Loading race control…</span></div>;
+  if (loading) return <div className="splash"><img src="/gridlock-flag.svg" width="40" height="40" alt="GRIDLOCK flag"/><strong>GRIDLOCK</strong><span>Loading race control…</span></div>;
   if (catalogue) return <TournamentCatalogue signedIn={!!user} onJoin={joinPublic} onBack={() => setCatalogue(false)}/>;
   if (!user) return <><AuthScreen invitation={!!invitation || !!pendingPublic} onBrowse={() => setCatalogue(true)} onLogin={data => setUser(data.user)}/>{notice && <div className="floating-notice"><Notice>{notice}</Notice></div>}</>;
   if (active) return <TournamentWorkspace key={active.id} tournament={active} user={user} onExit={exitTournament} onSignOut={signOut}/>;

@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {ArrowLeft, ArrowRight, Globe2, Search, Users} from 'lucide-react';
 import {get} from '../api';
-import {Action, Card, Notice} from '../shared/ui';
+import {Action, Card, Notice, FieldHelp} from '../shared/ui';
 import {FinancialTerms, type TournamentFinanceTerms} from '../components/FinancialTerms';
 
 /** Safe catalogue metadata: never contains private invitations, participant emails, or picks. */
@@ -49,8 +49,8 @@ export function TournamentCatalogue({onBack, onJoin, signedIn}: {
       <div className="eyebrow"><Globe2 size={16} /> THE PUBLIC PADDOCK</div>
       <h1>Tournament catalogue</h1>
       <p className="muted">Discover active public prediction pools. Public tournaments can also be joined via invitation; private tournaments are accessible only through invitations.</p>
-      <label className="catalogue-search"><Search size={18} /><input aria-label="Search public tournaments" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search competitions" maxLength={80}/></label>
-      <label className="input-label">TOURNAMENT SCOPE <select aria-label="Filter tournament scope" value={scope} onChange={e => setScope(e.target.value as 'all' | 'full' | 'mid')}><option value="all">All public competitions</option><option value="full">Full Season</option><option value="mid">Mid-Season only</option></select></label>
+      <label className="catalogue-search"><Search size={18} /><input aria-label="Search public tournaments" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search competitions" maxLength={80}/></label><FieldHelp label="Search public tournaments" detail="Search only active, public tournaments by name or description. Private invitation-only pools do not appear."/>
+      <label className="input-label">Show tournaments <FieldHelp label="Show tournaments" detail="Filter public competitions by full season or mid-season. Invite-only competitions will never appear here."/><select aria-label="Filter tournament scope" value={scope} onChange={e => setScope(e.target.value as 'all' | 'full' | 'mid')}><option value="all">All public competitions</option><option value="full">Full Season</option><option value="mid">Mid-Season only</option></select></label>
       {error && <Notice kind="error">{error}</Notice>}
       <section className="catalogue-grid" aria-label="Public tournaments">
         {entries.map(t => <Card key={t.id}>

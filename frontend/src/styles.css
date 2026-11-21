@@ -2189,3 +2189,12 @@ td.rank svg {
 .financial-rows {display:flex; flex-direction:column; gap:.65rem; margin:.8rem 0;}
 .financial-rows > div {display:flex; justify-content:space-between; gap:1rem;}
 .loss-warning {font-size:.74rem; color:#d48d52; display:block;}
+
+/* Inline accessible field help: click or keyboard-activate the info icon. */
+.field-caption {display:flex; align-items:center; gap:.45rem; flex-wrap:wrap;}
+.field-help {display:inline-flex; position:relative; vertical-align:middle; align-items:center; margin-left:.35rem; text-transform:none; letter-spacing:normal; font-weight:400;}
+.field-help-trigger {display:inline-flex; align-items:center; justify-content:center; width:25px; height:25px; border:1px solid #4a586d; color:#c8d4e7; background:#1a2230; border-radius:50%; padding:0; cursor:pointer; flex-shrink:0;}
+.field-help-trigger:hover, .field-help-trigger:focus-visible {border-color:#f45157; color:#fff; outline-offset:2px;}
+.field-help-content {position:absolute; z-index:35; left:0; top:calc(100% + 8px); width:min(320px, 75vw); max-width:320px; background:#252e3d; color:#eff3f9; border:1px solid #4e5b70; border-radius:9px; padding:12px 14px; line-height:1.5; font-size:13px; box-shadow:0 10px 26px #0009; text-align:left; white-space:normal;}
+.field-help-content::before {content:""; position:absolute; top:-6px; left:11px; width:9px; height:9px; background:#252e3d; border-top:1px solid #4e5b70; border-left:1px solid #4e5b70; transform:rotate(45deg);}
+@media (max-width:600px) {.field-help-content {left:auto; right:-10px;}}

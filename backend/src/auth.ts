@@ -80,20 +80,35 @@ export function recordFailedAttempt(key: string): void {
   run('INSERT INTO auth_attempts VALUES(?,?)', tokenHash(key), new Date().toISOString());
 }
 
+/** Compare operator bootstrap values in constant time after uniform hashing. */
+export function validBootstrapKey(candidate: unknown, expected: unknown): boolean {
+  const minimumKeyLength = process.env.NODE_ENV === 'production' ? 32 : 16;
+  if (typeof candidate !== 'string' || typeof expected !== 'string' || expected.length < minimumKeyLength || candidate.length > 1024) return false;
+  const a = createHash('sha256').update(candidate).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 /** Register a normal user, or optionally bootstrap the single global operator. */
 export function register(email: string, name: string, password: string, bootstrapKey?: string, requestedUsername?: string) {
 
   email = typeof email === 'string' ? email.trim().toLowerCase() : '';
   name = typeof name === 'string' ? name.trim() : '';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || name.length < 2 || name.length > 80 ||
+  const invalidName = [...name].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || name.length < 2 || name.length > 80 || invalidName ||
     typeof password !== 'string' || password.length < 12 || password.length > 256) {
 
     throw bad('Valid email, name (2–80), and password (12–256 characters) required');
   }
   const isAdmin = email === process.env.ADMIN_EMAIL?.toLowerCase();
-  if (isAdmin && (!process.env.ADMIN_BOOTSTRAP_KEY || bootstrapKey !== process.env.ADMIN_BOOTSTRAP_KEY)) {
-
-    throw forbidden('Operator registration requires a valid bootstrap key');
+  if (isAdmin) {
+    // In addition to the route's IP limit, throttle attempts across addresses
+    // targeting the single reserved operator email. No passwords are logged.
+    rateLimit('operator-bootstrap-global', 5, 60);
+    if (!validBootstrapKey(bootstrapKey, process.env.ADMIN_BOOTSTRAP_KEY)) {
+      recordFailedAttempt('operator-bootstrap-global');
+      throw forbidden('Operator registration requires a valid bootstrap key');
+    }
   }
   const userId = randomUUID();
   const username = requestedUsername ? normalizeUsername(requestedUsername) : normalizeUsername('player_' + userId.replace(/-/g, '').slice(0,12));
@@ -115,14 +130,22 @@ export function register(email: string, name: string, password: string, bootstra
 /** Authenticate a user and rate-limit failed attempts in durable storage. */
 export function login(email: string, password: string, remoteAddress = 'unknown') {
 
-  const normalized = String(email ?? '').trim().toLowerCase();
+  const normalized = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  // Every attempt, including malformed oversized input, counts against the IP quota.
+  const ipKey = `login-ip:${remoteAddress}`;
+  rateLimit(ipKey, 32, 15);
+  // Reject oversized/untyped credentials before invoking the synchronous scrypt KDF.
+  // Uniform 401s avoid disclosing whether the account exists.
+  if (normalized.length > 254 || typeof password !== 'string' || password.length > 256) {
+    recordFailedAttempt(ipKey);
+    throw new HttpError(401, 'Incorrect email or password');
+  }
   const key = `login:${remoteAddress}:${normalized}`;
   rateLimit(key);
-  rateLimit(`login-ip:${remoteAddress}`, 32, 15);
   const row = get('SELECT * FROM users WHERE email=?', normalized);
   // Do similar KDF work for unknown accounts so account existence is less observable.
   const fallback = '00'.repeat(16) + ':' + '00'.repeat(64);
-  if (!checkPassword(String(password ?? ''), row?.password_hash ?? fallback) || !row) {
+  if (!checkPassword(password, row?.password_hash ?? fallback) || !row) {
 
     recordFailedAttempt(key);
     recordFailedAttempt(`login-ip:${remoteAddress}`);

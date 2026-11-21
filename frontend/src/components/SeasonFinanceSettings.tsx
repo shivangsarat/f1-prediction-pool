@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {get, post, money} from '../api';
-import {Notice, Select} from '../shared/ui';
+import {Notice, Select, FieldHelp} from '../shared/ui';
 import {type PlatformPolicy} from './OperatorFinancePanel';
 import {formatBps} from './FinancialTerms';
 
@@ -58,21 +58,21 @@ export function SeasonFinanceSettings({season, form, onChange}: {
   function change(next: Partial<SeasonFinanceFields>) {onChange({...form, ...next});}
 
   return <section className="season-finance-settings" aria-label="Season payout rules">
-    <div className="divider-title">PRIZE ENGINE & HOUSE RAKE · {locked ? 'LOCKED AT ROUND 1' : 'LOCKS AT ROUND 1'}</div>
+    <div className="divider-title">Prize distribution and fees · {locked ? 'Locked at first qualifying' : 'Locks at first qualifying'}</div>
     <p className="muted">Choose one engine per season. House fees apply to both payout models and are calculated from buy-ins minus refunds. Financial settings freeze at the first qualifying deadline.</p>
-    <label className="input-label">PAYOUT ENGINE<Select disabled={locked} value={form.payoutModel} onChange={value => change({payoutModel: value as SeasonFinanceFields['payoutModel']})} options={[{value:'adaptive-3tier',label:'Adaptive 3-Tier · classic Top-3'},{value:'poker',label:'Casino Poker · scalable In The Money ladder'}]}/></label>
+    <label className="input-label">Prize distribution model<FieldHelp label="Prize distribution model" detail="Choose classic Top 3 prizes or the Poker model, where more places may receive an award."/><Select disabled={locked} value={form.payoutModel} onChange={value => change({payoutModel: value as SeasonFinanceFields['payoutModel']})} options={[{value:'adaptive-3tier',label:'Adaptive 3-Tier · classic Top-3'},{value:'poker',label:'Casino Poker · scalable In The Money ladder'}]}/></label>
     <div className="form-grid">
-      <label className="check-line"><input type="checkbox" disabled={locked || !creatorPermitted} checked={form.houseRakeEnabled} onChange={event=>change({houseRakeEnabled:event.target.checked})}/> Tournament creator house rake</label>
-      <label className="input-label">CREATOR RAKE (BPS)<input type="number" step="50" min="0" max={creatorHeadroom} disabled={locked || !creatorPermitted} value={form.houseRakeBps} onChange={event=>change({houseRakeBps:Number(event.target.value)})}/></label>
+      <label className="check-line"><input type="checkbox" disabled={locked || !creatorPermitted} checked={form.houseRakeEnabled} onChange={event=>change({houseRakeEnabled:event.target.checked})}/> Charge a tournament creator fee <FieldHelp label="Charge a tournament creator fee" detail="Take an optional fee for the person running this pool, subject to the platform 15% combined limit."/></label>
+      <label className="input-label">Creator fee (basis points)<FieldHelp label="Creator fee (basis points)" detail="100 basis points equals 1% of net entry contributions; operator and creator combined cannot exceed 1500 points (15%)."/><input type="number" step="50" min="0" max={creatorHeadroom} disabled={locked || !creatorPermitted} value={form.houseRakeBps} onChange={event=>change({houseRakeBps:Number(event.target.value)})}/></label>
     </div>
     <p className="muted">Operator hosting fee: {formatBps(operatorBps)} · Maximum creator headroom: {formatBps(creatorHeadroom)} · Combined maximum 15%. Creator may compete if they pay the same buy-in; refunds reduce both rake shares.</p>
     {!creatorPermitted && <Notice>Creator rake is disabled by the global operator or the operator already uses the 15% cap.</Notice>}
     {form.payoutModel === 'poker' && <>
       <div className="form-grid">
-        <label className="check-line"><input type="checkbox" disabled={locked} checked={form.pokerFloorEnabled} onChange={event=>change({pokerFloorEnabled:event.target.checked})}/> Guaranteed Min-Cash Floor (ON)</label>
-        <label className="input-label">TARGET IN-THE-MONEY FIELD (%)<input type="number" disabled={locked} min="15" max="50" step="1" value={form.pokerItmPct} onChange={event=>change({pokerItmPct:Number(event.target.value)})}/></label>
-        <label className="input-label">STEEPNESS MODE<Select disabled={locked} value={form.pokerAlphaMode} onChange={value=>change({pokerAlphaMode:value as SeasonFinanceFields['pokerAlphaMode']})} options={[{value:'auto',label:'Auto · N / races / stakes / ITM / floor'},{value:'manual',label:'Manual · fixed exponent'}]}/></label>
-        {form.pokerAlphaMode==='manual' && <label className="input-label">STEEPNESS α (0.50–2.50)<input type="number" disabled={locked} min="0.5" max="2.5" step="0.05" value={form.pokerAlphaManual} onChange={event=>change({pokerAlphaManual:Number(event.target.value)})}/></label>}
+        <label className="check-line"><input type="checkbox" disabled={locked} checked={form.pokerFloorEnabled} onChange={event=>change({pokerFloorEnabled:event.target.checked})}/> Guarantee paid players recover their entry <FieldHelp label="Guarantee paid players recover their entry" detail="When enabled, every paid prize must be at least a full entry fee; this may reduce the number of prize places."/></label>
+        <label className="input-label">Players receiving prizes (%)<FieldHelp label="Players receiving prizes (%)" detail="Target share of paying participants receiving a prize (15–50%); the final number depends on pool size, rake and the minimum-cash floor."/><input type="number" disabled={locked} min="15" max="50" step="1" value={form.pokerItmPct} onChange={event=>change({pokerItmPct:Number(event.target.value)})}/></label>
+        <label className="input-label">Prize curve<FieldHelp label="Prize curve" detail="Automatic distributes prizes based on the player count and race count; Manual lets you choose how top-heavy prizes are."/><Select disabled={locked} value={form.pokerAlphaMode} onChange={value=>change({pokerAlphaMode:value as SeasonFinanceFields['pokerAlphaMode']})} options={[{value:'auto',label:'Auto · N / races / stakes / ITM / floor'},{value:'manual',label:'Manual · fixed exponent'}]}/></label>
+        {form.pokerAlphaMode==='manual' && <label className="input-label">Manual prize curve (0.50–2.50)<FieldHelp label="Manual prize curve (0.50–2.50)" detail="Controls how sharply awards decline by place. Higher values prioritize winners; lower values distribute prizes more evenly."/><input type="number" disabled={locked} min="0.5" max="2.5" step="0.05" value={form.pokerAlphaManual} onChange={event=>change({pokerAlphaManual:Number(event.target.value)})}/></label>}
       </div>
       {!form.pokerFloorEnabled && <Notice kind="error">Loss-Reduction Mode: lower paid positions may receive less than the entry fee. Spots below 25% of the entry are trimmed automatically.</Notice>}
       <p className="muted">Small pools of nine or fewer players use 1–3 paid spots. Wider ITM thresholds may slightly reduce first-place prizes.</p>
