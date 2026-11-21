@@ -181,3 +181,12 @@ For a **November 2026** tournament, open Commissioner → Season setup; choose *
 ## Driver rosters are loaded automatically
 
 The **My Predictions** page no longer requires a commissioner to enter ten drivers for each round. Opening a season fetches the latest available current-year driver lineup from [OpenF1](https://openf1.org/docs/), including constructor names, via the authenticated backend. Imported identities are cached and stored in SQLite; existing ballot driver IDs are never deleted or retroactively changed. If OpenF1 hasn't published that year's lineup yet, the page offers **Retry OpenF1 sync**, and automated checks will resume. The existing manual roster controls remain as a fallback only. See [API contract](docs/API.md) and [operations guide](docs/OPERATIONS.md).
+
+
+## Production support and Oracle Cloud deployment (v2.3)
+
+The **[Production Support Centre](docs/production/README.md)** contains the [operator handbook](docs/production/SUPPORT_HANDBOOK.md) and [printable PDF](docs/production/GRIDLOCK-Production-Support-Handbook-v2.3.pdf), architecture and code-to-cloud map, branch-safe deployment procedure, incident troubleshooting, encrypted backup recovery, security/secret handling, and release checklist. It reconciles the three user-provided **21 November 2026 v2.3 deployment documents**, with sensitive infrastructure identifiers and personal information replaced by placeholders. The original, unredacted production PDFs are intentionally **not committed**.
+
+**As-built hosting:** one OCI Always Free ARM64 Ubuntu VM; Caddy terminates HTTPS and routes GRIDLOCK to `127.0.0.1:8081` and the independently deployed F1 telemetry dashboard to `127.0.0.1:8080`. The GRIDLOCK backend stays on private Docker port 3001, with SQLite and encrypted backup bind mounts on the host. The Compose host-port fallback is now `8081` to avoid colliding with telemetry; explicitly set `FRONTEND_PORT=8081` in the host's private `.env`.
+
+**Deployment is opt-in.** [GitHub Actions production deployment](.github/workflows/deploy-production.yml) is manual-only and requires separately configured SSH secrets and environment approval. The [guarded deploy script](scripts/production/deploy-gridlock.sh) requires an externalized `.env` symlink; see the [one-time secret migration guide](docs/production/DEPLOYMENT.md). No live VM, DNS, OAuth, firewall or cloud account was modified by this documentation release.

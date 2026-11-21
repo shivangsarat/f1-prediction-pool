@@ -1,0 +1,11 @@
+# Safe public template. Replace <POOL_FQDN> and <DASH_FQDN> on the VM only.
+# Do not publish the VM's real reserved IP or private hostname in repo documentation.
+<POOL_FQDN> {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8081
+}
+
+<DASH_FQDN> {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8080
+}

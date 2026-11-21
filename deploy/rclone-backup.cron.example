@@ -1,0 +1,4 @@
+# Example ROOT crontab entry ONLY. Fill in <VM_USER>, <OCI_BUCKET>, and optional prefix privately.
+# Run: sudo crontab -e (after verifying rclone --config path and read permissions).
+# Use copy, not sync: a local deletion must not automatically erase recovery history.
+0 4 * * * /usr/bin/rclone --config /home/<VM_USER>/.config/rclone/rclone.conf copy /opt/f1/f1-prediction-pool/backups oracle-s3:<OCI_BUCKET>/ --include '*.sqlite.gz.enc' --log-level ERROR

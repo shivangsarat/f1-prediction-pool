@@ -1,0 +1,59 @@
+name: Manual production deploy (GRIDLOCK only)
+
+# Intentionally NOT triggered by push: deployment requires human approval and host-side secret migration.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Validate backend
+        run: |
+          npm install --prefix backend --no-audit --no-fund
+          npm run lint --prefix backend
+          npm run test --prefix backend
+      - name: Validate frontend
+        run: |
+          npm install --prefix frontend --no-audit --no-fund
+          npm run lint --prefix frontend
+          npm run test --prefix frontend
+          npm run build --prefix frontend
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH to verified host and run guarded deployment
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          for value in SSH_HOST SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            test -n "${!value}" || { echo "Missing required production SSH setting: $value" >&2; exit 1; }
+          done
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_gridlock_prod"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_gridlock_prod" "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/id_gridlock_prod" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "${SSH_USER}@${SSH_HOST}" 'bash -se' \
+            < scripts/production/deploy-gridlock.sh

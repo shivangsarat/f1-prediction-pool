@@ -12,3 +12,14 @@ backups/
 *.log
 .DS_Store
 coverage/
+
+# Never commit environment variants, access keys, or encrypted/plaintext backup artifacts.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite.gz.enc
+rclone.conf
+secrets/
