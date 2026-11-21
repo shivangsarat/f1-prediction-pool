@@ -198,3 +198,17 @@ The UI now uses clearer field names and an accessible **info** button beside set
 See [field and toggle guide](docs/UX_FIELD_GUIDE.md) and the [21 November 2026 security review](docs/SECURITY_REVIEW_2026-11-21.md).
 
 **Production upgrade note:** Backend startup now requires `PUBLIC_ORIGIN` to be the configured **HTTPS origin** (no path, query or user credentials). If mail is enabled, `APP_PUBLIC_URL` must match it. Set both before updating your running VM. Global operator bootstrap keys must contain at least **32 characters**.
+
+
+## One-command production release (GRIDLOCK only)
+
+After the root deployment script exists on the VM (one-time `git pull` bootstrap if necessary), run:
+
+```bash
+cd /opt/f1/f1-prediction-pool
+bash ./deploy.sh
+```
+
+This entry point calls [the guarded production deployer](scripts/production/deploy-gridlock.sh). It fast-forwards only `main`, checks the externalized production `.env`, preserves SQLite and encrypted backups, rebuilds only GRIDLOCK's two containers, and verifies the local API at `127.0.0.1:8081`. It **does not** deploy F1 Telemetry. Refresh the browser after a successful health check.
+
+Alternatively, trigger **Actions → Manual production deploy (GRIDLOCK only)** on `main` using the protected `production` GitHub Environment and preconfigured `PROD_SSH_*` secrets. **Neither option redeploys on a mere push**; manual approval helps avoid service interruptions and unreviewed migrations. The [deployment runbook](docs/production/DEPLOYMENT.md) covers first-time setup and incident recovery.

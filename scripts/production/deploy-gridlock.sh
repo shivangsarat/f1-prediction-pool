@@ -15,6 +15,9 @@ preflight() {
   cd "$REPO_DIR"
   command -v docker >/dev/null || fail 'Docker is not installed.'
   command -v curl >/dev/null || fail 'curl is not installed.'
+  command -v flock >/dev/null || fail 'flock is required.'
+  exec 9> "$REPO_DIR/.git/.deploy.lock"
+  flock -n 9 || fail 'Another GRIDLOCK deployment is already running.'
   [[ "$(git branch --show-current)" == "$BRANCH" ]] || fail 'Checkout is not on main.'
   [[ -z "$(git status --porcelain --untracked-files=no)" ]] || fail 'Tracked working tree is dirty; inspect with git status/diff.'
   [[ -L .env ]] || fail '.env must be an externalized symlink; see docs/production/DEPLOYMENT.md.'

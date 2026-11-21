@@ -91,3 +91,14 @@ A matching example is [`Caddyfile.example`](../../deploy/Caddyfile.example); its
 - **Application-only failure with no schema change:** pin a reviewed earlier commit, rebuild, smoke-test and document incident ID.
 - **Database migrated:** restore a consistent encrypted database snapshot *together with compatible application code*, using [Backup & Recovery](BACKUP_RECOVERY.md). Never run old backend schema assumptions against migrated tables.
 - **Never:** use `docker compose down -v`, `git clean -fdx`, or delete `./data`, `./backups` and `/etc/f1-env` as a deployment step.
+
+
+## Root-level single command and GitHub Actions
+
+Use `cd /opt/f1/f1-prediction-pool && bash ./deploy.sh` to update the prediction-pool application. The root script delegates to `scripts/production/deploy-gridlock.sh`, which performs a guarded fast-forward of `main`, a Docker Compose rebuild, and an API GET smoke test. The dashboard has a **different** root deploy script in `/opt/f1/f1_telemetry`, pinned to `weekend-tyre-sets`. Do not deploy both unless both require updates.
+
+The existing GitHub Actions **Manual production deploy (GRIDLOCK only)** workflow provides the same process with pre-deployment checks and a protected `production` environment. Add its `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_PRIVATE_KEY`, and `PROD_SSH_KNOWN_HOSTS` secrets in GitHub Settings. These values are never copied into source or commit history. A run initiated through GitHub requires SSH access to the authorized VM; the workflow does not create or manage the VM.
+
+**First install:** if `deploy.sh` or its nested script is not yet present on the VM, perform one reviewed `git pull --ff-only origin main` from the expected checkout. Thereafter the single root command works. Updating frontend files does not invalidate a browser's already-open page until it reloads. Normal browser refresh fetches the updated Vite assets; do not use `docker compose down -v` or `git clean -fdx` to force an update.
+
+**Safety:** deployments are manual-only and serialized within each repository's Actions workflow. They are not cross-repository transactions. During a rollout, the prediction frontend/API may be momentarily unavailable. Check Caddy and the production HTTPS page after the local health check; automatic rollback is deliberately disabled for SQLite schema migrations.
