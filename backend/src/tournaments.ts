@@ -1,6 +1,7 @@
 import {createHash, randomBytes, randomUUID} from 'node:crypto';
 import {all, get, run, transaction} from './db.ts';
 import {HttpError, bad, type User} from './auth.ts';
+import {tournamentTerms} from './financeStore.ts';
 
 export type TournamentRole = 'operator' | 'commissioner' | 'player';
 export type Visibility = 'public' | 'invite_only';
@@ -61,7 +62,7 @@ export function publicCatalogue(query = '') {
   return all(`SELECT ${tournamentFields} FROM tournaments t
     WHERE t.visibility='public' AND t.status='active'
       AND (t.name LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
-    ORDER BY t.created_at DESC LIMIT 100`, `%${search}%`, `%${search}%`);
+    ORDER BY t.created_at DESC LIMIT 100`, `%${search}%`, `%${search}%`).map(tournament => ({...tournament, terms: tournamentTerms(tournament.id)}));
 }
 
 /** Require membership or global operator permission, hiding inaccessible private pools. */
@@ -119,7 +120,7 @@ export function invitePreview(code: unknown) {
   if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(code)) throw new HttpError(404, 'Invitation not found');
   const t = get(`SELECT ${tournamentFields} FROM tournaments t WHERE t.invite_hash=? AND t.status='active'`, inviteHash(code));
   if (!t) throw new HttpError(404, 'Invitation not found');
-  return t;
+  return {...t, terms: tournamentTerms(t.id)};
 }
 
 /** Join one active tournament using a secret link; repeat requests do not duplicate memberships. */
@@ -190,7 +191,7 @@ export function myInvitations(user: User) {
   return all(`SELECT i.id,i.tournament_id,t.name,t.visibility,i.created_at
     FROM tournament_user_invites i JOIN tournaments t ON t.id=i.tournament_id
     WHERE i.user_id=? AND i.status='pending' AND t.status='active'
-    ORDER BY i.created_at DESC`, user.id);
+    ORDER BY i.created_at DESC`, user.id).map(invite => ({...invite, terms: tournamentTerms(invite.tournament_id)}));
 }
 
 /** Accept or decline one invitation, checking that it is addressed to the current user. */

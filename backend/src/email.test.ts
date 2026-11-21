@@ -29,7 +29,9 @@ test('AES-GCM encryption/decryption does not reveal plaintext and detects tamper
   const ciphertext = encryptMail('secret join link');
   assert.equal(ciphertext.includes('secret join link'), false);
   assert.equal(decryptMail(ciphertext), 'secret join link');
-  assert.throws(() => decryptMail(ciphertext.slice(0, -1) + '_'));
+  const parts = ciphertext.split(':');
+  parts[3] = (parts[3][0] === 'A' ? 'B' : 'A') + parts[3].slice(1); // Auth tag mutation always differs.
+  assert.throws(() => decryptMail(parts.join(':')));
 });
 
 /** Encode a UTF-8 message with CRLF headers and avoid unencoded non-ASCII subjects. */

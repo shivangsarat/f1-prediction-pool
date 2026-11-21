@@ -3,9 +3,10 @@ import {Check, Mail, X} from 'lucide-react';
 import {get, post} from '../api';
 import {Action, Card, Notice} from '../shared/ui';
 import type {Tournament} from '../pages/TournamentLobby';
+import {FinancialTerms, type TournamentFinanceTerms} from './FinancialTerms';
 
 /** An invitation is visible only to the invited account, not every tournament participant. */
-type Invitation = {id: string; tournament_id: string; name: string; created_at: string};
+type Invitation = {id: string; tournament_id: string; name: string; created_at: string; terms?: TournamentFinanceTerms};
 
 /** Display incoming in-app invitations with explicit accept/decline decisions. */
 export function InvitationsPanel({onAccepted}: {onAccepted: (t: Tournament) => Promise<void>}) {
@@ -31,7 +32,7 @@ export function InvitationsPanel({onAccepted}: {onAccepted: (t: Tournament) => P
   return <Card><h2><Mail size={19} /> Tournament invitations</h2>
     {error && <Notice kind="error">{error}</Notice>}
     {invitations.map(invite => <div className="invitation-row" key={invite.id}>
-      <span>{invite.name}</span>
+      <div><strong>{invite.name}</strong><FinancialTerms terms={invite.terms} compact/></div>
       <Action disabled={busy} onClick={() => void respond(invite, 'accept')}><Check size={15}/> Accept</Action>
       <Action kind="ghost" disabled={busy} onClick={() => void respond(invite, 'decline')}><X size={15}/> Decline</Action>
     </div>)}

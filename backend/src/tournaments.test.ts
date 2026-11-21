@@ -51,8 +51,8 @@ test('tournament creation, listing and isolation', () => {
   assert.throws(() => joinTournament(other, a.inviteCode), {status: 404});
   assert.equal(joinTournament(other, changed.inviteCode).id, a.id);
   const now = new Date().toISOString();
-  run('INSERT INTO seasons VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', 'year-a', 2027, 'A', a.id, 'two-form', 'EUR', 1000, 5, 10, now, now, now, now);
-  run('INSERT INTO seasons VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', 'year-b', 2027, 'B', b.id, 'two-form', 'EUR', 1000, 5, 10, now, now, now, now);
+  run('INSERT INTO seasons(id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', 'year-a', 2027, 'A', a.id, 'two-form', 'EUR', 1000, 5, 10, now, now, now, now);
+  run('INSERT INTO seasons(id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', 'year-b', 2027, 'B', b.id, 'two-form', 'EUR', 1000, 5, 10, now, now, now, now);
   assert.equal(requireSeasonMember(stranger, 'year-a').id, 'year-a');
   assert.throws(() => requireSeasonMember(stranger, 'year-b'), {status: 404});
   assert.throws(() => requireSeasonCommissioner(stranger, 'year-a'), {status: 403});

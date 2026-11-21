@@ -1,6 +1,6 @@
 # GRIDLOCK — F1 Prediction Pool
 
-A multi-tournament Formula 1 prediction platform based on the finalized [system and scoring specification](docs/design-spec.pdf). Participants can **create a public or invite-only tournament, invite users by username or joining link, browse public competitions, and enter that tournament's own prediction workspace**. Parallel pools can share players without sharing their picks, scores, roles or financial ledgers.
+A multi-tournament Formula 1 prediction platform based on the finalized [GRIDLOCK v2.0 master specification](docs/specs/GRIDLOCK-master-v2.0.pdf) and [payout/rake delta](docs/specs/GRIDLOCK-finance-delta-v2.0.pdf). See the [finance implementation guide](docs/FINANCIAL_RULES_V2.md) for formulae, reconciliation, and source-table discrepancies. Participants can **create a public or invite-only tournament, invite users by username or joining link, browse public competitions, and enter that tournament's own prediction workspace**. Parallel pools can share players without sharing their picks, scores, roles or financial ledgers.
 
 This is an unofficial F1 fan project. It **does not accept card payments, process transfers, or hold funds**; commissioners manually record transactions settled elsewhere.
 
@@ -70,13 +70,13 @@ npm run dev --prefix backend
 npm run dev --prefix frontend
 ```
 
-Open `http://localhost:5173`, register an account (password at least 12 characters) and choose a unique username. Create a tournament and choose **public** (visible in the separate public catalogue) or **invite-only** (hidden). The creator becomes commissioner automatically. Share the one-time invitation URL, or invite an existing user by searching their username. A recipient must explicitly accept a username invitation. Returning players can join multiple tournaments without creating a new account.
+Open `http://localhost:5173`, register an account (password at least 12 characters) and choose a unique username. Create a tournament and choose **public** (visible in the separate public catalogue) or **invite-only** (hidden). The creator becomes commissioner automatically. Share the one-time invitation URL, or invite an existing user by searching their username. **Public pools can also be joined through these invitations as well as directly from the catalogue. Private pools can be joined ONLY through invitations.** A recipient must explicitly accept a username invitation. Returning players can join multiple tournaments without creating a new account.
 
 A secret link such as `https://gridlock.example/?invite=<token>` preserves its destination across registration/sign-in: existing signed-in users join and open the competition; guests see registration first, with an existing-account sign-in option, then join/open the specific tournament. Guests can also browse active public competitions, and after signing up are redirected to the chosen public pool.
 
 Choose a tournament from the lobby to open its **Race HQ, predictions, round leaderboard, season standings, championship picks, rules, prize ledger and commissioner functions**. Each screen makes tournament-authorized API requests, even if someone forges a season ID or edits a URL manually.
 
-Commissioners can edit their own tournament’s name, public/private visibility and archive state; invite existing usernames; create seasons; set locks/payout cutoffs; configure rosters/calendars; stage OpenF1 results; preview/publish scores; and record settled financial ledger entries. **The global operator (`users.role=admin`) can see and administer every tournament, regardless of membership, and can also perform database-wide maintenance.** Normal users see only tournaments they own or joined. All financial operations retain their audit trail and ledger invariants.
+Commissioners can edit their own tournament’s name, public/private visibility and archive state; invite existing usernames; create seasons; select the Adaptive 3-Tier or Poker payout engine; configure creator rake only when permitted by the operator; set ITM, floor and steepness before Round 1; set locks/payout cutoffs; configure rosters/calendars; stage OpenF1 results; preview/publish scores; and record settled financial ledger entries. **The global operator (`users.role=admin`) can see and administer every tournament, regardless of membership, and can also perform database-wide maintenance.** Normal users see only tournaments they own or joined. All financial operations retain their audit trail and ledger invariants.
 
 ## Production deployment
 
@@ -104,7 +104,7 @@ Read [operations and recovery](docs/OPERATIONS.md) before migrating an existing 
 - Users are registered once with a unique, case-insensitive username. Their individual memberships/commissioner privileges are **per tournament**. The global operator is explicitly exempt from membership restrictions, without silently adding a membership record.
 - Each tournament can configure its own seasons, including the same calendar year as another tournament.
 - Weekends, submissions, scoring, championship picks, entrant payments, payout projections and audits belong to an authorized tournament through its season.
-- Private join links use cryptographically random invitation codes, stored only as hashes and invalidated on rotation. Existing-user invitations are pending until the invited account accepts. Public tournaments are in a separate active catalogue and allow click-to-join for authenticated users.
+- Private join links use cryptographically random invitation codes, stored only as hashes and invalidated on rotation. Existing-user invitations are pending until the invited account accepts. Public tournaments are in a separate active catalogue and allow both click-to-join and invitation joins. Invite-only tournaments can only be joined through a valid username or secret-link invitation.
 - HTTP routes never trust the tournament selected in the browser: the API checks membership for the actual season/weekend being requested. Only the global operator can bypass tournament membership authorization; the operator still cannot override immutable submissions, official result publication freezes, or negative-cash ledger safeguards.
 - A preexisting v1 database is migrated into a dedicated **Legacy F1 Pool** tournament. Existing users remain members and previous seasons, submissions and ledger records are retained. **Back up the DB before upgrading.**
 
@@ -145,3 +145,7 @@ Named functions and components have `/** ... */` descriptions, and shared UI ele
 Review [security audit and residual risks](docs/SECURITY.md) before adding real participants or recorded money. Principal protections include salted scrypt password hashes, 256-bit random persisted sessions, HttpOnly/SameSite cookies, same-origin CSRF checks, persisted abuse throttles, tournament authorization on every scope, atomic and idempotent ledger writes, excluded private ledger keys, and encrypted snapshots in production.
 
 **Not yet a payment platform:** It does not collect, transmit, verify or distribute actual money. Commissioners must reconcile every external payment and comply with local law before using entry fees. Financial record correctness depends on trusted commissioners and source reconciliation.
+
+## Version 2.0 finance and transparency
+
+New seasons default to the original **Adaptive 3-Tier** payouts and **zero active house rake**. The operator may enable a default 5% hosting fee; if the global permission allows it, a commissioner may additionally set a creator fee. Combined active fees **must never exceed 15%** and remain frozen after Round 1 lock. Commissioners can instead choose **Casino Poker** with a selectable full-entry floor (ON) or a loss-reduction option (OFF), ITM 15–50%, and automatic or manual steepness. The catalogue, invitations, Rules page and Ledger disclose the live payout model and house fees. See [full v2 finance documentation](docs/FINANCIAL_RULES_V2.md) and the [two uploaded v2 source PDFs](docs/specs/).

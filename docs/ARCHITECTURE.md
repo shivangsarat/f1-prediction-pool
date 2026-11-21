@@ -35,3 +35,9 @@ All row queries using a season or weekend ID first verify tournament membership 
 The React app is an independently built and served static SPA with reusable page components. It never imports backend source. Node API owns its own scoring functions and durable database. For low-cost deployment, nginx and Node are independent processes/containers connected via internal network; the SQLite writer remains single-process.
 
 A future managed PostgreSQL migration can preserve the API and frontend separation. A multi-instance backend would additionally require distributed OpenF1 rate limiting, coordinated backups and transaction retry handling.
+
+## v2.0 finance boundaries and immutability
+
+The operator-only `platform_finance` singleton and `seasons` financial columns are separate data owners. `financeStore.ts` snapshots operator and creator basis-point rates into the season when its first qualifying lock passes; changes to global policy never mutate historical rake. The pure `finance.ts` engine computes both rake shares and the active payout ladder from **net collected buy-ins**, not ledger cash on hand. `server.ts` enforces beneficiary identity, authorizations, idempotency, and payout ceilings; each ledger write is atomic.
+
+Catalogue metadata and invitations use `tournamentTerms()` to compute the **current** financial contract; emails are only a historical notification and are never substituted for this server-derived join-time disclosure. Public pools accept catalogue and invitation entries; invite-only pools require a valid invitation token or accepted named-user invitation. See [v2 financial contract](FINANCIAL_RULES_V2.md).

@@ -41,6 +41,8 @@ test('catalogue contains active public pools only', () => {
   assert.throws(() => requireTournament(outsider, privatePool.id), {status: 404});
   assert.equal(invitePreview(privatePool.inviteCode).id, privatePool.id);
   assert.equal(joinTournament(outsider, privatePool.inviteCode).id, privatePool.id);
+  assert.equal(invitePreview(publicPool.inviteCode).id, publicPool.id, 'public tournaments are also invite-accessible');
+  assert.equal(joinTournament(outsider, publicPool.inviteCode).id, publicPool.id, 'public tournament join-by-link is supported');
   assert.equal(joinPublicTournament(invited, publicPool.id).id, publicPool.id);
   assert.equal(requireTournament(invited, publicPool.id).role, 'player');
   assert.throws(() => requireCommissioner(invited, publicPool.id), {status: 403});

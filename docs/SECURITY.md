@@ -46,3 +46,11 @@ Date: 21 November 2026. Scope: source-level review of the browser, API, SQLite, 
 14. **Global operator privileges:** The operator can administer all tournaments and their ledgers and is a high-value target. Restrict `ADMIN_EMAIL`, guard bootstrap credentials, monitor audit events, and independently reconcile any ledger adjustment. Immutable results and no-overdraft policies remain in force.
 
 **Conclusion:** The core multi-tenant isolation and the highest-risk browser/session and ledger access issues identified in the initial code have been addressed and covered by tests. The platform is still a prototype, not a certified or independently audited financial system.
+
+## v2.0 financial authorization and abuse controls
+
+- Only a global operator may change hosting rake, authorize creator rake globally or debit a `platform_rake` transaction. Tournament commissioners can change their own unlocked season finance settings only; `house_rake` disbursements are restricted to the actual tournament owner, including nonplaying owners.
+- The backend caps combined effective operator + creator rates at 1,500 basis points and freezes their season snapshots at Round 1 lock; legacy seasons remain at zero rake. Individual house disbursements cannot exceed their gross-pot-derived entitlements. Player disbursements require final published championship results and cannot exceed individual earned shares. A ledger debit never overdrafts.
+- User-supplied `tournamentId`, `seasonId` and username/invitation token never grant permissions by themselves. Public catalogue joining checks `visibility=public`; private joining is invitation-only, with time and nonce checks. Live financial terms are shown at acceptance to prevent misleading stale invite-email promises.
+- Account identities, password hashes, OAuth refresh tokens, and raw invitation codes must never be included in public catalogue, invitation, or ledger responses. Store the SQLite database and backup-encryption key outside the Git repository; use HTTPS and protected outbound email credentials.
+- This implementation is not a substitute for penetration testing, payment reconciliation, legal/regulatory review or an independent financial audit before using it with real-money stakes.

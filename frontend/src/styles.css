@@ -2176,3 +2176,16 @@ td.rank svg {
 .notification-opt-in {display: flex;align-items: center;gap: 9px;cursor: pointer;}
 .notification-opt-in input {accent-color: #fa5157;width: 16px;height: 16px;}
 .floating-notice {position: fixed;z-index: 1000;top: 15px;right: 15px;max-width: 500px;}
+
+/* v2.0 financial disclosures are shown before joining and beside every projected payout. */
+.financial-terms {display:flex; flex-direction:column; gap:.35rem; margin:.7rem 0; font-size:.83rem; line-height:1.5;}
+.financial-terms strong {color:var(--text,#e8ebf3);}
+.financial-terms small,.financial-caveat {font-size:.75rem; opacity:.85;}
+.financial-caveat {display:flex; align-items:center; gap:.4rem;}
+.season-finance-settings {margin:1.2rem 0; display:flex; flex-direction:column; gap:.8rem;}
+.season-finance-settings .form-grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem;}
+.finance-preview {padding:1rem; border:1px solid var(--border, #50515b); border-radius:.65rem;}
+.finance-preview ol {display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.4rem 1rem; padding-left:1.5rem;}
+.financial-rows {display:flex; flex-direction:column; gap:.65rem; margin:.8rem 0;}
+.financial-rows > div {display:flex; justify-content:space-between; gap:1rem;}
+.loss-warning {font-size:.74rem; color:#d48d52; display:block;}

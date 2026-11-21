@@ -7,7 +7,9 @@ import {readJson, assertSameOrigin, securityHeaders, sendJson, writeAudit, clien
 import {listTournaments, publicCatalogue, invitePreview, requireTournament, requireCommissioner, requireSeasonMember, requireSeasonCommissioner, createTournament, joinTournament, joinPublicTournament, rotateInvite, amendTournament, searchUsers, inviteExistingUser, myInvitations, respondInvitation} from './tournaments.ts';
 import {queryOpenF1, calendarFromSessions, fetchDraft} from './openf1.ts';
 import {queueNotification, requestEmailVerification, confirmEmail, mailProvider, mailStatus, drainEmailOutbox, reconcileDeadlineEmails, publicUrl} from './email.ts';
-import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, payoutPlan, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
+import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
+import {financePlan, grossFromEntries} from './finance.ts';
+import {platformPolicy, updatePlatformPolicy, seasonFinanceConfig, snapshotFinance, financeProjection, tournamentTerms, validateSeasonFinanceChanges} from './financeStore.ts';
 
 // A production instance must be able to make encrypted backups before accepting payments or picks.
 if (process.env.NODE_ENV === 'production' && !/^[a-fA-F0-9]{64}$/.test(process.env.BACKUP_ENCRYPTION_KEY ?? '')) {
@@ -220,8 +222,9 @@ function memberContributions(seasonId: string) {
 function ledgerSummary(seasonId: string) {
   const rows = all('SELECT * FROM ledger WHERE season_id=? ORDER BY created_at DESC', seasonId);
   const cash = rows.reduce((n, r) => n + r.amount_cents, 0);
-  const gross = rows.filter(r => r.amount_cents > 0).reduce((n, r) => n + r.amount_cents, 0);
-  return {entries: rows, cashCents: cash, totalInflowsCents: gross};
+  const gross = grossFromEntries(rows);
+  const distributedCents = -rows.filter(r => ['payout', 'platform_rake', 'house_rake'].includes(r.type)).reduce((n, r) => n + r.amount_cents, 0);
+  return {entries: rows, cashCents: cash, grossPotCents: gross, distributedCents, totalInflowsCents: gross};
 }
 /**
  * Combine race points, summer salvage penalties, and championship bonuses per member.
@@ -254,9 +257,9 @@ function standingRows(seasonId: string): Array<RankingRow & {name: string; salva
  */
 function payoutSnapshot(s: any) {
 
-  const standings = standingRows(s.id), members = memberContributions(s.id), ledger = ledgerSummary(s.id);
-  const plan = payoutPlan(standings, members, ledger.cashCents, s.base_entry_cents, {smallMax: s.small_max, mediumMax: s.medium_max});
-  return {...plan, currency: s.currency, participants: members.filter(m => m.contributionCents > 0).length};
+  const standings = standingRows(s.id), members = memberContributions(s.id);
+  const plan = financeProjection(s.id, standings, members);
+  return {...plan, currency: s.currency};
 }
 /**
  * Present a safe, derived weekend record with live server-side lock status.
@@ -331,6 +334,22 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   }
   const user = auth(req);
   if (method === 'GET' && p === '/api/auth/me') return reply(res, 200, {...user, emailVerified: !!get('SELECT email_verified_at FROM users WHERE id=?', user.id)?.email_verified_at, notificationOptIn: !!get('SELECT notification_opt_in FROM users WHERE id=?', user.id)?.notification_opt_in});
+  if (method === 'GET' && p === '/api/finance-policy') return reply(res, 200, platformPolicy());
+  if (p === '/api/operator/finance') {
+    if (user.role !== 'admin') throw new HttpError(403, 'Global operator access required');
+    if (method === 'GET') return reply(res, 200, platformPolicy());
+    if (method === 'PATCH') {
+      const b = await body(req);
+      const allowed = ['platformRakeEnabled', 'platformRakeBps', 'allowTournamentHouseRake'];
+      if (Object.keys(b).some(key => !allowed.includes(key))) throw bad('Unknown operator policy field');
+      try {
+        const policy = updatePlatformPolicy(b);
+        audit(user.id, 'operator.finance.policy', user.id, '', policy);
+        return reply(res, 200, policy);
+      } catch (e) {throw bad((e as Error).message);}
+    }
+  }
+
   if (method === 'POST' && p === '/api/account/verification-email') {
     requestEmailVerification(user);
     return reply(res, 202, {queued: mailProvider() !== 'none'});
@@ -376,6 +395,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
 
     const t = requireTournament(user, parts[2]);
     if (method === 'GET' && parts.length === 3) return reply(res, 200, t);
+    if (method === 'GET' && parts[3] === 'terms' && parts.length === 4) return reply(res, 200, tournamentTerms(t.id));
     if (method === 'PATCH' && parts.length === 3) {
       const changes = await body(req);
       const amended = amendTournament(user, t.id, changes);
@@ -388,7 +408,9 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     if (method === 'POST' && parts[3] === 'invite-user' && parts.length === 4) {
       const b = await body(req);
       const result = inviteExistingUser(user, t.id, b.userId);
-      notifySafely(b.userId, `invited:${t.id}:${b.userId}`, t.id, `Invitation to ${t.name}`, `You have a new GRIDLOCK tournament invitation. Sign in to accept it:\n${publicUrl()}/?tournament=${t.id}`);
+      const terms = tournamentTerms(t.id);
+      const disclosure = terms.configured ? `Payout: ${terms.payoutModel}; operator fee: ${(terms.platformRakeBps / 100).toFixed(2)}%; creator fee: ${(terms.creatorRakeBps / 100).toFixed(2)}%; ${terms.payoutModel === 'poker' ? `Poker Floor: ${terms.pokerFloorEnabled ? 'ON' : 'OFF'}; ` : ''}` : 'Financial terms pending.';
+      notifySafely(b.userId, `invited:${t.id}:${b.userId}`, t.id, `Invitation to ${t.name}`, `You have a GRIDLOCK tournament invitation.\n${disclosure}\nFinancial settings freeze at Round 1 Qualifying lock; confirm live terms before accepting.\nSign in to view and accept:\n${publicUrl()}/?tournament=${t.id}`);
       audit(user.id, 'tournament.invite-user', t.id, '', {userId: b.userId});
       return reply(res, 201, result);
     }
@@ -405,11 +427,11 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const t = url.searchParams.get('tournamentId');
     if (!t) throw bad('tournamentId required');
     requireTournament(user, t);
-    return reply(res, 200, all('SELECT * FROM seasons WHERE tournament_id=? ORDER BY year DESC', t))
+    return reply(res, 200, all('SELECT * FROM seasons WHERE tournament_id=? ORDER BY year DESC', t).map(s => ({...s, configLocked: seasonIsLocked(s), finance: seasonFinanceConfig(s.id)})))
   }
   if (method === 'GET' && parts[1] === 'seasons' && parts.length === 3) {
     const s = season(parts[2], user);
-    return reply(res, 200, {...s, configLocked: seasonIsLocked(s), champions: get('SELECT wdc,wcc,published_at FROM champions WHERE season_id=?', s.id) ?? null})
+    return reply(res, 200, {...s, configLocked: seasonIsLocked(s), finance: seasonFinanceConfig(s.id), champions: get('SELECT wdc,wcc,published_at FROM champions WHERE season_id=?', s.id) ?? null})
   }
   if (method === 'GET' && p === '/api/weekends') {
     const s = url.searchParams.get('seasonId');
@@ -517,13 +539,18 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     if (Date.parse(sEnd) - Date.parse(sStart) !== 7 * 86400000 || new Date(sStart).getUTCMonth() !== 7 || new Date(sEnd).getUTCMonth() !== 7) throw bad('Salvage window must be exactly 7 days entirely within August (UTC)');
     try {
       return reply(res, 201, transaction(() => {
-        run('INSERT INTO seasons VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', sId, year, String(b.name ?? `F1 ${year}`), b.tournamentId, b.sprintMode ?? 'two-form', currency, base, small, medium, pre, sStart, sEnd, now());
+        run('INSERT INTO seasons(id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', sId, year, String(b.name ?? `F1 ${year}`), b.tournamentId, b.sprintMode ?? 'two-form', currency, base, small, medium, pre, sStart, sEnd, now());
+        const settings = validateSeasonFinanceChanges(sId, b);
+        run(`UPDATE seasons SET payout_model=?,house_rake_enabled=?,house_rake_bps=?,poker_floor_enabled=?,poker_itm_pct=?,poker_alpha_mode=?,poker_alpha_manual=? WHERE id=?`,
+          settings.payoutModel, Number(settings.houseRakeEnabled), settings.houseRakeBps, Number(settings.pokerFloorEnabled), settings.pokerItmPct, settings.pokerAlphaMode, settings.pokerAlphaManual, sId);
         audit(user.id, 'season.create', sId);
         return {id: sId}
       }))
     } catch (e: any) {
       if (/UNIQUE/.test(String(e))) throw new HttpError(409, 'Season already exists');
-      throw e
+      if (e instanceof HttpError) throw e;
+      if (/rake|poker|payout|ITM|alpha|configuration/i.test(String(e))) throw bad((e as Error).message);
+      throw e;
     }
   }
   if (method === 'PATCH' && parts[2] === 'seasons' && parts.length === 4) {
@@ -536,11 +563,26 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     int(patch.base_entry_cents, 1);
     int(patch.small_max, 3, 100);
     int(patch.medium_max, patch.small_max + 1, 200);
-    return reply(res, 200, transaction(() => {
-      run('UPDATE seasons SET sprint_mode=?,base_entry_cents=?,small_max=?,medium_max=? WHERE id=?', patch.sprint_mode, patch.base_entry_cents, patch.small_max, patch.medium_max, s.id);
-      audit(user.id, 'season.config', s.id, '', patch);
-      return patch
-    }));
+    try {
+      return reply(res, 200, transaction(() => {
+        run('UPDATE seasons SET sprint_mode=?,base_entry_cents=?,small_max=?,medium_max=? WHERE id=?', patch.sprint_mode, patch.base_entry_cents, patch.small_max, patch.medium_max, s.id);
+        const finance = validateSeasonFinanceChanges(s.id, b);
+        run(`UPDATE seasons SET payout_model=?,house_rake_enabled=?,house_rake_bps=?,poker_floor_enabled=?,poker_itm_pct=?,poker_alpha_mode=?,poker_alpha_manual=? WHERE id=?`,
+          finance.payoutModel, Number(finance.houseRakeEnabled), finance.houseRakeBps, Number(finance.pokerFloorEnabled), finance.pokerItmPct, finance.pokerAlphaMode, finance.pokerAlphaManual, s.id);
+        audit(user.id, 'season.config', s.id, '', {...patch, ...finance});
+        return {...patch, finance: seasonFinanceConfig(s.id)};
+      }));
+    } catch (error) {if (error instanceof HttpError) throw error; throw bad((error as Error).message);}
+  }
+  if (method === 'POST' && p === '/api/admin/finance-preview') {
+    const b = await body(req), s = requireSeasonCommissioner(user, b.seasonId);
+    try {
+      const financial = validateSeasonFinanceChanges(s.id, b);
+      const cfg = {...seasonFinanceConfig(s.id), payoutModel: financial.payoutModel, creatorRakeBps: financial.houseRakeEnabled ? financial.houseRakeBps : 0,
+        pokerFloorEnabled: financial.pokerFloorEnabled, pokerItmPct: financial.pokerItmPct, pokerAlphaMode: financial.pokerAlphaMode, pokerAlphaManual: financial.pokerAlphaManual};
+      const projected = financePlan(standingRows(s.id), memberContributions(s.id), ledgerSummary(s.id).grossPotCents, cfg as any);
+      return reply(res, 200, projected);
+    } catch (error) {throw bad((error as Error).message);}
   }
   if (method === 'POST' && p === '/api/admin/roster') {
 
@@ -729,32 +771,57 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     }
   }
   if (method === 'POST' && p === '/api/admin/ledger') {
-
-    const b = await body(req), s = requireSeasonCommissioner(user, b.seasonId), type = b.type, amount = int(Math.abs(b.amountCents), 1, 100000000);
-    if (!['buyin', 'adjustment', 'refund', 'payout'].includes(type)) throw bad('Unsupported transaction type');
-    const signed = ['refund', 'payout'].includes(type) ? -amount : (type === 'adjustment' && b.amountCents < 0 ? -amount : amount);
-    if (['buyin', 'refund', 'payout'].includes(type) && !b.userId) throw bad('Buy-in, refund and payout must identify a tournament participant');
-    if (b.userId && !get('SELECT 1 FROM tournament_members WHERE tournament_id=? AND user_id=?', s.tournament_id, b.userId)) throw bad('Unknown tournament participant');
+    const b = await body(req), s = requireSeasonCommissioner(user, b.seasonId);
+    const type = b.type, amount = int(Math.abs(b.amountCents), 1, 100000000);
+    if (!['buyin', 'adjustment', 'refund', 'payout', 'platform_rake', 'house_rake'].includes(type)) throw bad('Unsupported ledger transaction type');
+    const signed = ['refund', 'payout', 'platform_rake', 'house_rake'].includes(type) ? -amount : (type === 'adjustment' && b.amountCents < 0 ? -amount : amount);
+    const ownerId = get('SELECT owner_id FROM tournaments WHERE id=?', s.tournament_id)?.owner_id;
+    const recipient = type === 'platform_rake' ? user.id : type === 'house_rake' ? ownerId : (b.userId ?? null);
+    if (type === 'platform_rake' && user.role !== 'admin') throw new HttpError(403, 'Only the global operator can record platform rake');
+    if (type === 'house_rake' && !ownerId) throw new HttpError(409, 'Tournament creator is not configured');
+    if (['buyin', 'refund', 'payout'].includes(type) && !recipient) throw bad('Buy-in, refund and player payout must identify a participant');
+    if (['buyin', 'refund', 'payout'].includes(type) && !get('SELECT 1 FROM tournament_members WHERE tournament_id=? AND user_id=?', s.tournament_id, recipient)) throw bad('Unknown tournament participant');
+    if (b.userId && ['platform_rake', 'house_rake'].includes(type) && b.userId !== recipient) throw bad('House rake recipient must match its beneficiary');
+    if (type === 'adjustment' && b.userId && !get('SELECT 1 FROM tournament_members WHERE tournament_id=? AND user_id=?', s.tournament_id, b.userId)) throw bad('Unknown tournament participant');
     if (!validId(b.idempotencyKey) || typeof b.description !== 'string' || b.description.trim().length < 3 || b.description.length > 500) throw bad('Idempotency key and description of 3–500 characters required');
     return reply(res, 201, transaction(() => {
-
       const existing = get('SELECT * FROM ledger WHERE idempotency_key=?', b.idempotencyKey);
       if (existing) {
-        if (existing.season_id !== s.id || existing.user_id !== (b.userId ?? null) || existing.amount_cents !== signed || existing.type !== type) throw new HttpError(409, 'Idempotency key already used for a different transaction');
+        if (existing.season_id !== s.id || existing.user_id !== recipient || existing.amount_cents !== signed || existing.type !== type) throw new HttpError(409, 'Idempotency key already used for a different transaction');
         return {...existing, replayed: true};
       }
+      const summary = ledgerSummary(s.id);
+      const plan = payoutSnapshot(s);
+      const disbursement = ['platform_rake', 'house_rake', 'payout'].includes(type);
+      const anyDisbursed = summary.entries.some(row => ['platform_rake', 'house_rake', 'payout'].includes(row.type));
+      if (!disbursement && anyDisbursed) throw new HttpError(409, 'Contributions and refunds are frozen after the first distribution');
+      if (type === 'buyin' && get("SELECT 1 FROM ledger WHERE season_id=? AND user_id=? AND type='buyin'", s.id, recipient)) {
+        throw new HttpError(409, 'Rebuys are not allowed');
+      }
       if (type === 'refund') {
-        const paid = get("SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND user_id=? AND type IN ('buyin','refund')", s.id, b.userId)?.cents ?? 0;
+        if (seasonIsLocked(s)) throw new HttpError(409, 'Refunds require review before Round 1 locks');
+        const paid = get("SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND user_id=? AND type IN ('buyin','refund')", s.id, recipient)?.cents ?? 0;
         if (paid < amount) throw new HttpError(409, 'Refund exceeds the participant’s net paid entry');
       }
       if (type === 'payout') {
-        const eligible = get("SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND user_id=? AND type IN ('buyin','refund')", s.id, b.userId)?.cents ?? 0;
-        if (eligible <= 0) throw new HttpError(409, 'Payout requires a paying tournament participant');
+        const eligible = get("SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND user_id=? AND type IN ('buyin','refund')", s.id, recipient)?.cents ?? 0;
+        if (eligible <= 0) throw new HttpError(409, 'Payout requires a paying participant');
+        if (!get('SELECT 1 FROM champions WHERE season_id=?', s.id)) throw new HttpError(409, 'Player payouts require final championship results');
+        const entitled = plan.prizes.find(prize => prize.userId === recipient)?.amountCents ?? 0;
+        const alreadyPaid = -(get("SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND user_id=? AND type='payout'", s.id, recipient)?.cents ?? 0);
+        if (amount > entitled - alreadyPaid) throw new HttpError(409, 'Player payout exceeds final prize entitlement');
       }
-      if (ledgerSummary(s.id).cashCents + signed < 0) throw new HttpError(409, 'Ledger transaction would overdraw the pool');
-      const row = {id: id(), season_id: s.id, user_id: b.userId ?? null, type, amount_cents: signed, description: b.description, idempotency_key: b.idempotencyKey, created_by: user.id, created_at: now()};
+      if (type === 'platform_rake' || type === 'house_rake') {
+        if (!seasonIsLocked(s)) throw new HttpError(409, 'House rake disbursements require frozen Round-1 financial settings');
+        const entitled = type === 'platform_rake' ? plan.platformRakeCents : plan.creatorRakeCents;
+        const alreadyPaid = -(get('SELECT COALESCE(SUM(amount_cents),0) AS cents FROM ledger WHERE season_id=? AND type=?', s.id, type)?.cents ?? 0);
+        if (amount > entitled - alreadyPaid) throw new HttpError(409, 'House rake disbursement exceeds its fixed entitlement');
+      }
+      if (summary.cashCents + signed < 0) throw new HttpError(409, 'Ledger transaction would overdraw the pool');
+      if (!disbursement && type === 'adjustment' && summary.grossPotCents + signed < 0) throw new HttpError(409, 'Gross pot cannot become negative');
+      const row = {id: id(), season_id: s.id, user_id: recipient, type, amount_cents: signed, description: b.description, idempotency_key: b.idempotencyKey, created_by: user.id, created_at: now()};
       run('INSERT INTO ledger VALUES(?,?,?,?,?,?,?,?,?)', ...Object.values(row));
-      audit(user.id, 'ledger.entry', row.id, '', {type, signed});
+      audit(user.id, 'ledger.entry', row.id, '', {type, signed, recipient});
       return row;
     }));
   }

@@ -1,3 +1,4 @@
+import {FinancialTerms} from '../components/FinancialTerms';
 import {Card, SectionHeading} from '../shared/ui';
 
 /** Render the signed-off pool rules inside the currently selected tournament. */
@@ -22,8 +23,25 @@ export function RulesPage({season}: {season: any}) {
       <Card><h3>Season predictions</h3><p>Preseason drivers' and constructors' champions earn +25 each. During the one-week August salvage window, changing a pick costs −15 points per category.</p>
         <p>All forms are blind until the server-enforced UTC lock. Once locked, picks cannot be edited.</p>
       </Card>
-      <Card><h3>Prize distribution</h3><p>For 2–3 paying players, first takes the pool; for 4–5 players, first/second receive 75%/25%. For 6–10 players, third receives one base entry refund and the remainder splits 75%/25%. For 11+, the split is 65%/25%/10%.</p>
-        <p>Buy-ins and refunds are tracked in an auditable ledger, and prorated entrants have capped eligibility. Payouts never exceed collected funds.</p>
+      <Card>
+        <h3>Prize distribution</h3>
+        <FinancialTerms terms={season.finance ? {
+          configured: true,
+          payoutModel: season.finance.payoutModel,
+          platformRakeBps: season.finance.platformRakeBps,
+          creatorRakeBps: season.finance.creatorRakeBps,
+          totalRakeBps: season.finance.platformRakeBps + season.finance.creatorRakeBps,
+          pokerFloorEnabled: season.finance.pokerFloorEnabled,
+          pokerItmPct: season.finance.pokerItmPct,
+          configLocked: season.finance.configLocked,
+          warning: 'Rates and payout settings freeze at Round 1 qualifying lock; recheck before joining or paying.',
+        } : undefined}/>
+        {season.finance?.payoutModel === 'poker' ? (
+          <p>The Casino Poker model pays a variable number of ranked finishers based on effective buy-ins and the target ITM percentage. Higher steepness concentrates rewards near first place. Floor ON reserves at least one full entry fee for each paid position. Floor OFF redistributes the entire net pot by rank, so lower paid positions may receive less than their buy-in.</p>
+        ) : (
+          <p>The Adaptive 3-Tier model pays up to three places: 2–3 players winner-take-all; 4–5 players 75%/25%; 6–10 players a third-place entry refund and 75%/25% of the balance; 11+ players 65%/25%/10%. An inversion safety guard applies if house rake reduces the net pot.</p>
+        )}
+        <p>Operator and creator house fees are deducted independently from net collected buy-ins, with a hard combined 15% cap. The remaining player pot uses exact-cent allocation. Tied places are combined and split; prorated entrants have capped eligibility. No prize may exceed collected funds.</p>
       </Card>
     </div>
   </>;

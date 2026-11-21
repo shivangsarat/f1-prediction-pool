@@ -174,6 +174,38 @@ export function migrateDiscoverability(): void {
 }
 migrateDiscoverability();
 
+/** Add v2.0 financial policy and frozen season terms without altering pre-existing v1 payout behavior. */
+export function migrateFinance(): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS platform_finance (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    platform_rake_enabled INTEGER NOT NULL DEFAULT 0,
+    platform_rake_bps INTEGER NOT NULL DEFAULT 500 CHECK(platform_rake_bps BETWEEN 0 AND 1500),
+    allow_tournament_house_rake INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  )`);
+  db.prepare('INSERT OR IGNORE INTO platform_finance(id,updated_at) VALUES(1,?)').run(new Date().toISOString());
+  const existing = new Set((db.prepare('PRAGMA table_info(seasons)').all() as Array<{name:string}>).map(x => x.name));
+  const additions: Record<string,string> = {
+    payout_model: "TEXT NOT NULL DEFAULT 'adaptive-3tier'",
+    house_rake_enabled: 'INTEGER NOT NULL DEFAULT 0',
+    house_rake_bps: 'INTEGER NOT NULL DEFAULT 500',
+    poker_floor_enabled: 'INTEGER NOT NULL DEFAULT 1',
+    poker_itm_pct: 'INTEGER NOT NULL DEFAULT 20',
+    poker_alpha_mode: "TEXT NOT NULL DEFAULT 'auto'",
+    poker_alpha_manual: 'REAL NOT NULL DEFAULT 1.5',
+    platform_rake_bps_snapshot: 'INTEGER DEFAULT NULL',
+    house_rake_bps_snapshot: 'INTEGER DEFAULT NULL',
+    finance_locked_at: 'TEXT DEFAULT NULL',
+  };
+  const isMigrating = !existing.has('payout_model');
+  for (const [column, definition] of Object.entries(additions)) {
+    if (!existing.has(column)) db.exec(`ALTER TABLE seasons ADD COLUMN ${column} ${definition}`);
+  }
+  // Historical v1 seasons have no rake and must remain grandfathered even when operator policy changes.
+  if (isMigrating) db.exec(`UPDATE seasons SET platform_rake_bps_snapshot=0, house_rake_bps_snapshot=0, finance_locked_at=created_at`);
+}
+migrateFinance();
+
 
 export type Row = Record<string, any>;
 /**

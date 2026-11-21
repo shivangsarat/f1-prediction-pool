@@ -5,6 +5,7 @@ import {Action, Card, Notice, TextInput} from '../shared/ui';
 import {InvitationsPanel} from '../components/InvitationsPanel';
 import {NotificationSettings} from '../components/NotificationSettings';
 import {OperatorMailPanel} from '../components/OperatorMailPanel';
+import {OperatorFinancePanel} from '../components/OperatorFinancePanel';
 
 /** A tournament is visible to its members, or to the platform operator across all pools. */
 export type Tournament = {
@@ -84,7 +85,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
           </select></label>
           <Action type="submit" disabled={busy || name.trim().length < 3}>Create tournament <ArrowRight size={16}/></Action>
         </form></Card>
-        <Card><form onSubmit={join}><h2><Shield size={20}/> Join by invitation</h2><p className="muted">Paste the private invite code or full joining URL.</p>
+        <Card><form onSubmit={join}><h2><Shield size={20}/> Join by invitation</h2><p className="muted">Paste a joining code or URL. Invitations work for both public and private tournaments; private tournaments require an invitation.</p>
           <TextInput label="INVITATION CODE OR LINK" value={invite} onChange={setInvite} placeholder="Paste invite code"/>
           <Action type="submit" disabled={busy || invite.trim().length < 20}>Join tournament <ArrowRight size={16}/></Action>
         </form></Card>
@@ -95,7 +96,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
           <Action kind="ghost" onClick={() => setNewCode('')}>Dismiss</Action>
         </div></Card>}
       <NotificationSettings/>
-      {user.role === 'admin' && <OperatorMailPanel/>}
+      {user.role === 'admin' && <><OperatorFinancePanel/><OperatorMailPanel/></>}
     </main>
   </div>;
 }

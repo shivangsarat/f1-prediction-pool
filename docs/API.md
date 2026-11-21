@@ -1,8 +1,33 @@
+# Current v2.0 API contract (supersedes older examples below)
+
+**Visibility:** Public tournaments may be joined from `/api/catalogue`, via `/api/tournaments/join-public`, or by an authenticated invitation link / accepted username invitation. Invite-only tournaments **never** appear in the catalogue and require a valid invitation. Public and private invite flows preserve the tournament destination through new-user registration.
+
+**Financial routes:**
+
+| Method | Endpoint | Authorization | Semantics |
+| --- | --- | --- | --- |
+| GET | `/api/finance-policy` | Signed-in users | Safe operator policy used for commissioner UI; no secrets |
+| GET | `/api/operator/finance` | Global operator | Current platform rake permission/rate |
+| PATCH | `/api/operator/finance` | Global operator | Update `platformRakeEnabled`, `platformRakeBps`, `allowTournamentHouseRake`; grandfather Round-1 locked seasons |
+| GET | `/api/tournaments/:id/terms` | Authorized tournament member/operator | Live season payout, fee, floor and freeze disclosure |
+| GET | `/api/catalogue` | Public | Public tournaments and live `terms` field |
+| GET | `/api/invitations` | Invited user | Private pending invitations and live `terms` field |
+| GET | `/api/invite-preview/:token` | Link holder | Limited tournament metadata and live `terms` |
+| POST | `/api/admin/seasons` | Tournament commissioner/operator | Create with optional `payoutModel`, `houseRakeEnabled`, `houseRakeBps`, `pokerFloorEnabled`, `pokerItmPct`, `pokerAlphaMode`, `pokerAlphaManual` |
+| PATCH | `/api/admin/seasons/:id` | Tournament commissioner/operator | Update financial settings until Round 1 lock |
+| POST | `/api/admin/finance-preview` | Tournament commissioner/operator | `{seasonId,...financialFields}`: server-calculated cent-exact prize preview |
+| GET | `/api/ledger?seasonId=...` | Tournament member/operator | Cash balance, contribution-derived gross/net/house entitlements and projected positions |
+| POST | `/api/admin/ledger` | Commissioner/operator | May record `platform_rake` (global operator only), `house_rake` (creator beneficiary only), alongside historical types; entitlement and cash caps apply |
+
+The season record includes `finance`, a server-resolved read-only view of effective financial settings, including Round-1 snapshots. `payouts` in Ledger includes `grossPotCents`, `platformRakeCents`, `creatorRakeCents`, `netPlayerPotCents`, `paidPlaces`, `slotsCents`, `alpha`, `payoutModel`, and individually capped `prizes`. All money is integer cents; `platformRakeBps + creatorRakeBps <= 1500` for active rates. Rake **never** reuses remaining cash after disbursement. Old v1 seasons migrate to adaptive/zero rake. Consult [v2 financial contract](FINANCIAL_RULES_V2.md).
+
+---
+
 # Gridlock HTTP API (v2) — tournament-scoped
 
 All API responses are JSON. Browser sessions are conveyed using a `f1pool_session` **HttpOnly, SameSite Strict cookie**. In production the cookie is also `Secure`; JavaScript never reads the session secret. Use `credentials:'same-origin'`. JSON writes require `Content-Type: application/json` and the browser's same-origin `Origin` header; server rejects foreign origins. CLI clients can use separately authorized Bearer tokens, although normal login/register responses do **not** disclose tokens to JavaScript.
 
-Unauthorized tournament/season/weekend lookups return **404**, not the existence or details of another pool. Commissioner actions require the calling user's membership role of `commissioner` **in that tournament**. The global operator role does not override membership.
+Unauthorized tournament/season/weekend lookups return **404**, not the existence or details of another pool. Commissioner actions require the calling user's membership role of `commissioner` **in that tournament**. The global operator role **does** override membership for audited global administration; ordinary users and tournament commissioners remain tenant-scoped.
 
 ## Authentication
 
@@ -96,7 +121,7 @@ A fully cancelled race or a classified race with fewer than two green-flag laps 
 
 ## Security notes
 
-Operator routes provide **no global visibility into tournament predictions or member ledgers**. `POST /api/admin/backup` is a deliberately separate whole-database maintenance capability. Session values remain inaccessible to browser JavaScript. See [source audit](SECURITY.md).
+Operator routes permit **global visibility and tournament-scoped administration across every tournament**. Nonoperators never bypass membership checks. `POST /api/admin/backup` is a deliberately separate whole-database maintenance capability. Session values remain inaccessible to browser JavaScript. See [source audit](SECURITY.md).
 
 ## Global operator, tournament catalogue and invitations (v0.3)
 
