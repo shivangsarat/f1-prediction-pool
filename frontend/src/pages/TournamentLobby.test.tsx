@@ -1,10 +1,11 @@
 import React from 'react';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {TournamentLobby} from './TournamentLobby';
 import {post} from '../api';
 
 vi.mock('../api', () => ({post: vi.fn()}));
+afterEach(cleanup);
 const mockPost = vi.mocked(post);
 const tournament = {id: 'a', name: 'Paddock Championship', description: 'Friends league', role: 'commissioner' as const, memberCount: 4};
 

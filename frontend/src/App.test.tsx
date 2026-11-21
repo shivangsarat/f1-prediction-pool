@@ -1,11 +1,12 @@
 import React from 'react';
-import {it, expect, vi} from 'vitest';
-import {render, screen, waitFor} from '@testing-library/react';
+import {afterEach, it, expect, vi} from 'vitest';
+import {cleanup, render, screen, waitFor} from '@testing-library/react';
 import {App} from './App';
 import {get} from './api';
 
 vi.mock('./api', () => ({get: vi.fn(), post: vi.fn()}));
 vi.mock('./pages/TournamentWorkspace', () => ({TournamentWorkspace: ({tournament}: {tournament: {name: string}}) => <div>Workspace for {tournament.name}</div>}));
+afterEach(cleanup);
 const mockGet = vi.mocked(get);
 
 /** Authenticated participants see the tournament lobby before any season or picks. */

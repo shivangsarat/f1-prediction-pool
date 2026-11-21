@@ -9,7 +9,7 @@ export function tournamentName(value: unknown): string {
 
   if (typeof value !== 'string') throw bad('Tournament name is required');
   const name = value.trim();
-  if (name.length < 3 || name.length > 80 || /[<>\x00-\x1f]/.test(name)) {
+  if (name.length < 3 || name.length > 80 || /[<>]/.test(name) || [...name].some(char => char.charCodeAt(0) < 32)) {
 
     throw bad('Tournament name must contain 3–80 printable characters');
   }
@@ -61,7 +61,7 @@ export function createTournament(user: User, name: unknown, description: unknown
 
   const safeName = tournamentName(name);
   const safeDescription = typeof description === 'string' ? description.trim() : '';
-  if (safeDescription.length > 500 || /[<>\x00-\x08]/.test(safeDescription)) throw bad('Description must contain up to 500 plain-text characters');
+  if (safeDescription.length > 500 || /[<>]/.test(safeDescription) || [...safeDescription].some(char => char.charCodeAt(0) < 9)) throw bad('Description must contain up to 500 plain-text characters');
   const id = randomUUID(), inviteCode = newInviteCode(), now = new Date().toISOString();
   return transaction(() => {
 

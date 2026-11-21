@@ -178,7 +178,7 @@ function computeScores(w: any, result: GPClassification) {
   const users = all('SELECT u.id,u.display_name FROM users u JOIN tournament_members m ON m.user_id=u.id WHERE m.tournament_id=?', w.tournament_id);
   return users.map(u => {
 
-    const own = submissions.filter(s => s.user_id === u.id), forms: Object = Object.fromEntries(own.map(s => [s.form, s.payload]));
+    const own = submissions.filter(s => s.user_id === u.id), forms: Record<string, unknown> = Object.fromEntries(own.map(s => [s.form, s.payload]));
     const details = scoreBallot(forms as ScoreInput, result, w.sprint_mode, !!w.is_sprint);
     return {userId: u.id, displayName: u.display_name, ...details};
   });
