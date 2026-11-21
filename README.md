@@ -166,3 +166,10 @@ Review [security audit and residual risks](docs/SECURITY.md) before adding real 
 ## Version 2.0 finance and transparency
 
 New seasons default to the original **Adaptive 3-Tier** payouts and **zero active house rake**. The operator may enable a default 5% hosting fee; if the global permission allows it, a commissioner may additionally set a creator fee. Combined active fees **must never exceed 15%** and remain frozen after Round 1 lock. Commissioners can instead choose **Casino Poker** with a selectable full-entry floor (ON) or a loss-reduction option (OFF), ITM 15–50%, and automatic or manual steepness. The catalogue, invitations, Rules page and Ledger disclose the live payout model and house fees. See [full v2 finance documentation](docs/FINANCIAL_RULES_V2.md) and the [two uploaded v2 source PDFs](docs/specs/).
+
+
+## Version 2.1 — Mid-season tournaments and cross-pool fairness
+
+The commissioner can configure a new tournament to start from a real F1 round after Round 1, using a future-only OpenF1 calendar preview, optional scaled WDC/WCC predictions and conditional August salvage. Short 1–2-race cups must be free; a zero-entry season records no real-money prizes or rake. Existing tournaments retain their scores and post-lock buy-ins independently of any new competition. Public tournaments support discovery and invitation, while private ones remain invitation-only. The operator controls public mid-season creation and active tournament ownership caps; OpenF1 data and outgoing email priority are shared across pools to protect free provider quotas.
+
+**Read [full v2.1 implementation, setup, migration and security notes](docs/MIDSEASON_V2_1.md)** and the attached [v2.1 master specification](docs/specs/GRIDLOCK-master-v2.1.pdf) / [mid-season feature delta](docs/specs/GRIDLOCK-midseason-delta-v2.1.pdf). The original v2.0 documents remain preserved for history.

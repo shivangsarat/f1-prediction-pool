@@ -16,6 +16,7 @@ export function TournamentCatalogue({onBack, onJoin, signedIn}: {
   signedIn: boolean;
 }) {
   const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<'all' | 'full' | 'mid'>('all');
   const [entries, setEntries] = useState<PublicTournament[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -26,13 +27,13 @@ export function TournamentCatalogue({onBack, onJoin, signedIn}: {
     let canceled = false;
     setLoading(true);
     const timer = setTimeout(() => {
-      get<PublicTournament[]>(`/catalogue?q=${encodeURIComponent(query)}`)
+      get<PublicTournament[]>(`/catalogue?q=${encodeURIComponent(query)}${scope === 'all' ? '' : `&scope=${scope}`}`)
         .then(data => {if (!canceled) {setEntries(data); setError('');}})
         .catch((e: Error) => {if (!canceled) setError(e.message);})
         .finally(() => {if (!canceled) setLoading(false);});
     }, 150);
     return () => {canceled = true; clearTimeout(timer);};
-  }, [query]);
+  }, [query, scope]);
 
   /** Join a selected public competition after authentication, or continue to account creation. */
   async function join(tournament: PublicTournament) {
@@ -49,10 +50,11 @@ export function TournamentCatalogue({onBack, onJoin, signedIn}: {
       <h1>Tournament catalogue</h1>
       <p className="muted">Discover active public prediction pools. Public tournaments can also be joined via invitation; private tournaments are accessible only through invitations.</p>
       <label className="catalogue-search"><Search size={18} /><input aria-label="Search public tournaments" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search competitions" maxLength={80}/></label>
+      <label className="input-label">TOURNAMENT SCOPE <select aria-label="Filter tournament scope" value={scope} onChange={e => setScope(e.target.value as 'all' | 'full' | 'mid')}><option value="all">All public competitions</option><option value="full">Full Season</option><option value="mid">Mid-Season only</option></select></label>
       {error && <Notice kind="error">{error}</Notice>}
       <section className="catalogue-grid" aria-label="Public tournaments">
         {entries.map(t => <Card key={t.id}>
-          <div className="eyebrow"><Globe2 size={14} /> PUBLIC · ACTIVE</div>
+          <div className="eyebrow"><Globe2 size={14} /> PUBLIC · ACTIVE · {t.terms?.scope === 'mid' ? `MID-SEASON · STARTS R${t.terms.openingRound} · ${t.terms.scheduledRaces} RACES` : 'FULL SEASON'}</div>
           <h2>{t.name}</h2><p className="muted">{t.description || 'An F1 prediction championship open to participants.'}</p>
           <p className="muted"><Users size={15} /> {t.memberCount} participants</p>
           <FinancialTerms terms={t.terms} compact/>

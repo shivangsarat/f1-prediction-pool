@@ -20,7 +20,11 @@ export function RulesPage({season}: {season: any}) {
         <p>Sprint winner +5, top constructor by Sprint points +3, and most places gained +3. Tied Sprint teams or drivers each earn full points.</p>
         <p><strong>Maximum:</strong> 85 points per Grand Prix or 96 points on a Sprint weekend.</p>
       </Card>
-      <Card><h3>Season predictions</h3><p>Preseason drivers' and constructors' champions earn +25 each. During the one-week August salvage window, changing a pick costs −15 points per category.</p>
+      <Card><h3>Season predictions · {season.opening_round > 1 ? `Mid-Season R${season.opening_round}` : 'Full Season'}</h3>
+        <p>{!season.championship_enabled ? 'Pure Race-by-Race Mode: championship predictions and associated bonuses are disabled.' :
+          `Correct drivers’ and constructors’ championship picks earn +${season.scope?.championshipBonus ?? 25} each.`} {' '}
+          {season.salvage_enabled ? `August salvage changes cost −${season.scope?.salvagePenalty ?? 15} per category.` : 'There is no August salvage window.'}
+        </p>
         <p>All forms are blind until the server-enforced UTC lock. Once locked, picks cannot be edited.</p>
       </Card>
       <Card>
@@ -34,7 +38,8 @@ export function RulesPage({season}: {season: any}) {
           pokerFloorEnabled: season.finance.pokerFloorEnabled,
           pokerItmPct: season.finance.pokerItmPct,
           configLocked: season.finance.configLocked,
-          warning: 'Rates and payout settings freeze at Round 1 qualifying lock; recheck before joining or paying.',
+          scope: season.opening_round > 1 ? 'mid' : 'full',openingRound: season.opening_round ?? 1,scheduledRaces:season.scope?.scheduledRaces ?? 0,championshipEnabled:!!season.championship_enabled,salvageEnabled:!!season.salvage_enabled,
+          warning: 'Rates and payout settings freeze at this pool’s opening qualifying lock; joining another pool does not refund locked buy-ins.',
         } : undefined}/>
         {season.finance?.payoutModel === 'poker' ? (
           <p>The Casino Poker model pays a variable number of ranked finishers based on effective buy-ins and the target ITM percentage. Higher steepness concentrates rewards near first place. Floor ON reserves at least one full entry fee for each paid position. Floor OFF redistributes the entire net pot by rank, so lower paid positions may receive less than their buy-in.</p>

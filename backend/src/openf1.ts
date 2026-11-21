@@ -1,27 +1,61 @@
 /** OpenF1 is a data supplier, NOT the official FIA authority. Never auto-publish. */
 import {HttpError} from './auth.ts';
+import {get, run} from './db.ts';
 const BASE = 'https://api.openf1.org/v1';
 let nextAllowed = 0;
+const inFlight = new Map<string, Promise<any[]>>();
+
+/** Normalize OpenF1 parameters to a stable global cache key shared by parallel tournaments. */
+export function cacheKey(endpoint: string, params: Record<string, string | number>): string {
+  return `${endpoint}:${JSON.stringify(Object.entries(params).sort(([a], [b]) => a.localeCompare(b)))}`;
+}
+
+/** Set safe cache lifetimes; changing result classifications are refreshed more often than calendars. */
+export function cacheLifetime(endpoint: string): number {
+  if (endpoint === 'sessions' || endpoint === 'meetings') return 15 * 60_000;
+  if (endpoint === 'drivers') return 60 * 60_000;
+  return 90_000;
+}
+
 /**
- * Fetch OpenF1 API records with a timeout and structured error handling.
- * @param endpoint - Input to this operation.
- * @param params - Input to this operation.
+ * Request OpenF1 once per unique endpoint and parameter set, sharing both concurrent
+ * and recent responses across tournaments using persisted SQLite cache entries.
  */
 export async function queryOpenF1(endpoint: string, params: Record<string, string | number>): Promise<any[]> {
+  if (!/^[a-z_]+$/.test(endpoint)) throw new HttpError(400, 'Invalid OpenF1 endpoint');
+  const key = cacheKey(endpoint, params);
+  const at = new Date().toISOString();
+  const cached = get('SELECT content FROM openf1_cache WHERE cache_key=? AND expires_at>?', key, at);
+  if (cached) return JSON.parse(cached.content);
+  const pending = inFlight.get(key);
+  if (pending) return pending;
 
-  const url = new URL(`${BASE}/${endpoint}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  // Process-wide serialized calls. In case of multiple instances, configure upstream shared throttling.
-  const scheduled = Math.max(Date.now(), nextAllowed);
-  nextAllowed = scheduled + 2100;
-  const pause = scheduled - Date.now();
-  if (pause) await new Promise(r => setTimeout(r, pause));
-  const response = await fetch(url, {headers: {accept: 'application/json'}, signal: AbortSignal.timeout(12000)});
-  if (!response.ok) throw new HttpError(502, `OpenF1 ${endpoint}: HTTP ${response.status}; try manual import or retry later`);
-  const data = await response.json();
-  if (!Array.isArray(data)) throw new HttpError(502, 'Unexpected OpenF1 response');
-  return data;
+  /** Serialize upstream requests while retaining independent tournament DB records. */
+  const request = (async () => {
+    const url = new URL(`${BASE}/${endpoint}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    const scheduled = Math.max(Date.now(), nextAllowed);
+    nextAllowed = scheduled + 2100;
+    const pause = scheduled - Date.now();
+    if (pause) await new Promise(resolve => setTimeout(resolve, pause));
+    const response = await fetch(url, {headers: {accept: 'application/json'}, signal: AbortSignal.timeout(12000)});
+    if (!response.ok) throw new HttpError(502, `OpenF1 ${endpoint}: HTTP ${response.status}; try manual import or retry later`);
+    const data = await response.json();
+    if (!Array.isArray(data)) throw new HttpError(502, 'Unexpected OpenF1 response');
+    const content = JSON.stringify(data);
+    // Avoid unbounded database growth from abnormally large upstream session results.
+    if (Buffer.byteLength(content, 'utf8') <= 6 * 1024 * 1024) {
+      const now = new Date();
+      run(`INSERT INTO openf1_cache(cache_key,endpoint,content,updated_at,expires_at)
+        VALUES(?,?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at,expires_at=excluded.expires_at`,
+        key, endpoint, content, now.toISOString(), new Date(now.getTime() + cacheLifetime(endpoint)).toISOString());
+    }
+    return data;
+  })();
+  inFlight.set(key, request);
+  try {return await request;} finally {inFlight.delete(key);}
 }
+
 /**
  * Translate OpenF1 session timing into championship weekend candidates.
  * @param rows - Input to this operation.

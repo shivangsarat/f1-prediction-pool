@@ -1,6 +1,7 @@
 import {useState, type FormEvent} from 'react';
 import {ArrowRight, Check, FlagTriangleRight, Globe2, LogOut, Plus, Shield, Users} from 'lucide-react';
 import {post} from '../api';
+import {MidseasonLaunchFields, type LaunchFields} from '../components/MidseasonLaunchFields';
 import {Action, Card, Notice, TextInput} from '../shared/ui';
 import {InvitationsPanel} from '../components/InvitationsPanel';
 import {NotificationSettings} from '../components/NotificationSettings';
@@ -13,6 +14,7 @@ export type Tournament = {
   role: 'operator' | 'commissioner' | 'player';
   visibility: 'public' | 'invite_only'; status: 'active' | 'archived';
   memberCount: number; created_at?: string;
+  launch_opening_round?: number; launch_expected_races?: number;
 };
 
 /** Display private memberships (or operator's all-pools list), creation, invites, and discovery. */
@@ -27,6 +29,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'invite_only'>('invite_only');
+  const [launch, setLaunch] = useState<LaunchFields>({year:new Date().getFullYear(), openingRound:1, expectedRaces:24});
   const [invite, setInvite] = useState('');
   const [newCode, setNewCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,8 +39,8 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
   async function create(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
     try {
-      const created = await post<Tournament & {inviteCode: string}>('/tournaments', {name, description, visibility});
-      setName(''); setDescription(''); setNewCode(created.inviteCode);
+      const created = await post<Tournament & {inviteCode: string}>('/tournaments', {name, description, visibility, ...(launch.openingRound > 1 ? launch : {})});
+      setName(''); setDescription(''); setLaunch({year:new Date().getFullYear(),openingRound:1,expectedRaces:24}); setNewCode(created.inviteCode);
       await onRefresh();
     } catch (e) {setError((e as Error).message);} finally {setBusy(false);}
   }
@@ -70,7 +73,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
       <section className="lobby-tournaments" aria-label="My tournaments">
         {tournaments.length ? tournaments.map(t => <button className="tournament-tile" key={t.id} onClick={() => onOpen(t)}>
           <div className="tile-icon"><FlagTriangleRight size={26}/></div>
-          <span className="eyebrow">{t.role === 'operator' ? 'PLATFORM OPERATOR' : t.role === 'commissioner' ? 'COMMISSIONER' : 'PARTICIPANT'} · {t.visibility === 'public' ? 'PUBLIC' : 'INVITE ONLY'} · {t.status?.toUpperCase()}</span>
+          <span className="eyebrow">{t.role === 'operator' ? 'PLATFORM OPERATOR' : t.role === 'commissioner' ? 'COMMISSIONER' : 'PARTICIPANT'} · {t.visibility === 'public' ? 'PUBLIC' : 'INVITE ONLY'} · {t.launch_opening_round && t.launch_opening_round > 1 ? `MID-SEASON R${t.launch_opening_round}` : 'FULL SEASON'} · {t.status?.toUpperCase()}</span>
           <h2>{t.name}</h2><p>{t.description || 'F1 prediction championship'}</p>
           <div className="tile-bottom"><span><Users size={15}/>{t.memberCount} members</span><span>Enter tournament <ArrowRight size={16}/></span></div>
         </button>) : <Card><div className="welcome-empty"><FlagTriangleRight size={36}/><h2>No tournaments yet</h2><p>Create one, accept a private invitation, or explore the public catalogue.</p></div></Card>}
@@ -79,6 +82,7 @@ export function TournamentLobby({user, tournaments, onRefresh, onOpen, onSignOut
         <Card><form onSubmit={create}><h2><Plus size={20}/> Create a tournament</h2><p className="muted">You become commissioner and control this tournament's rules and financial ledger.</p>
           <TextInput label="TOURNAMENT NAME" value={name} onChange={setName} placeholder="2027 Friends Championship"/>
           <TextInput label="DESCRIPTION (OPTIONAL)" value={description} onChange={setDescription} placeholder="Weekend prediction challenge"/>
+          <MidseasonLaunchFields value={launch} onChange={setLaunch}/>
           <label className="input-label">WHO CAN FIND IT?<select value={visibility} aria-label="Tournament visibility" onChange={event => setVisibility(event.target.value as 'public' | 'invite_only')}>
             <option value="invite_only">Invite only — hidden from the public catalogue</option>
             <option value="public">Public — listed and open to join</option>

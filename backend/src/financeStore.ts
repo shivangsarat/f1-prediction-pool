@@ -7,6 +7,8 @@ export interface PlatformPolicy {
   platformRakeEnabled: boolean;
   platformRakeBps: number;
   allowTournamentHouseRake: boolean;
+  allowPublicMidseason: boolean;
+  maxActiveOwnedPools: number;
 }
 
 /** Return the operator's global controls, without disclosing any credentials. */
@@ -16,12 +18,14 @@ export function platformPolicy(): PlatformPolicy {
     platformRakeEnabled: !!row?.platform_rake_enabled,
     platformRakeBps: row?.platform_rake_bps ?? 500,
     allowTournamentHouseRake: !!row?.allow_tournament_house_rake,
+    allowPublicMidseason: !!row?.allow_public_midseason,
+    maxActiveOwnedPools: row?.max_active_owned_pools ?? 3,
   };
 }
 
 /** Reject globally invalid platform percentages and toggles before writing them. */
 export function validatePlatformPolicy(policy: PlatformPolicy): void {
-  if (typeof policy.platformRakeEnabled !== 'boolean' || typeof policy.allowTournamentHouseRake !== 'boolean' || !Number.isInteger(policy.platformRakeBps) || policy.platformRakeBps < 0 || policy.platformRakeBps > 1500) {
+  if (typeof policy.platformRakeEnabled !== 'boolean' || typeof policy.allowTournamentHouseRake !== 'boolean' || !Number.isInteger(policy.platformRakeBps) || policy.platformRakeBps < 0 || policy.platformRakeBps > 1500 || typeof policy.allowPublicMidseason !== 'boolean' || !Number.isInteger(policy.maxActiveOwnedPools) || policy.maxActiveOwnedPools < 1 || policy.maxActiveOwnedPools > 20) {
     throw Error('Invalid platform rake settings');
   }
 }
@@ -33,8 +37,8 @@ export function updatePlatformPolicy(patch: Partial<PlatformPolicy>): PlatformPo
   validatePlatformPolicy(next);
   return transaction(() => {
     snapshotLockedSeasons();
-    run(`UPDATE platform_finance SET platform_rake_enabled=?,platform_rake_bps=?,allow_tournament_house_rake=?,updated_at=? WHERE id=1`,
-      next.platformRakeEnabled ? 1 : 0, next.platformRakeBps, next.allowTournamentHouseRake ? 1 : 0, new Date().toISOString());
+    run(`UPDATE platform_finance SET platform_rake_enabled=?,platform_rake_bps=?,allow_tournament_house_rake=?,allow_public_midseason=?,max_active_owned_pools=?,updated_at=? WHERE id=1`,
+      next.platformRakeEnabled ? 1 : 0, next.platformRakeBps, next.allowTournamentHouseRake ? 1 : 0, Number(next.allowPublicMidseason), next.maxActiveOwnedPools, new Date().toISOString());
     return next;
   });
 }
@@ -89,8 +93,13 @@ export function seasonFinanceConfig(seasonId: string): FinanceConfig & {configLo
 
 /** Select the active season's live financial terms without exposing private tournament membership data. */
 export function tournamentTerms(tournamentId: string) {
-  const season = get('SELECT id,currency,base_entry_cents,year FROM seasons WHERE tournament_id=? ORDER BY year DESC LIMIT 1', tournamentId);
-  if (!season) return {configured: false, warning: 'No season has been configured; confirm terms before buying in.'};
+  const season = get('SELECT id,currency,base_entry_cents,year,opening_round,championship_enabled,salvage_enabled FROM seasons WHERE tournament_id=? ORDER BY year DESC LIMIT 1', tournamentId);
+  if (!season) {
+    const launch = get('SELECT launch_opening_round,launch_expected_races FROM tournaments WHERE id=?', tournamentId);
+    return {configured: false, scope: launch?.launch_opening_round > 1 ? 'mid' : 'full',
+      openingRound: launch?.launch_opening_round ?? 1, scheduledRaces: launch?.launch_expected_races ?? 0,
+      warning: 'No season has been configured; confirm terms before buying in.'};
+  }
   const config = seasonFinanceConfig(season.id);
   return {
     configured: true,
@@ -98,6 +107,11 @@ export function tournamentTerms(tournamentId: string) {
     year: season.year,
     currency: season.currency,
     baseEntryCents: season.base_entry_cents,
+    scope: season.opening_round === 1 ? 'full' : 'mid',
+    openingRound: season.opening_round,
+    scheduledRaces: config.scheduledRaces,
+    championshipEnabled: !!season.championship_enabled,
+    salvageEnabled: !!season.salvage_enabled,
     payoutModel: config.payoutModel,
     platformRakeBps: config.platformRakeBps,
     creatorRakeBps: config.creatorRakeBps,
@@ -105,7 +119,7 @@ export function tournamentTerms(tournamentId: string) {
     pokerFloorEnabled: config.payoutModel === 'poker' ? config.pokerFloorEnabled : null,
     pokerItmPct: config.payoutModel === 'poker' ? config.pokerItmPct : null,
     configLocked: config.configLocked,
-    warning: 'Financial settings freeze at Round 1 Qualifying lock; confirm live terms before joining or paying.',
+    warning: 'Financial settings freeze at this tournament’s opening qualifying lock; new pools do not refund locked entries in other competitions.',
   };
 }
 

@@ -206,6 +206,60 @@ export function migrateFinance(): void {
 }
 migrateFinance();
 
+/**
+ * Add v2.1 mid-season governance, optional championship timestamps and shared OpenF1 caching.
+ * Rebuild the seasons definition only once to remove v1's NOT NULL August dates safely;
+ * foreign keys are checked immediately after the transaction to protect existing scores.
+ */
+export function migrateMidseason(): void {
+  const cols = (table: string) => new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name: string}>).map(row => row.name));
+  const current = cols('seasons');
+  if (!current.has('championship_enabled')) {
+    const schema = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='seasons'").get() as {sql:string}).sql;
+    const relaxed = schema.replace(/^CREATE TABLE\s+"?seasons"?/i, 'CREATE TABLE seasons_midseason')
+      .replace(/preseason_lock TEXT NOT NULL/gi, 'preseason_lock TEXT')
+      .replace(/salvage_start TEXT NOT NULL/gi, 'salvage_start TEXT')
+      .replace(/salvage_end TEXT NOT NULL/gi, 'salvage_end TEXT')
+      .replace(/,\s*UNIQUE\(tournament_id,year\)/i, ', championship_enabled INTEGER NOT NULL DEFAULT 1, salvage_enabled INTEGER NOT NULL DEFAULT 1, opening_round INTEGER NOT NULL DEFAULT 1, UNIQUE(tournament_id,year)');
+    if (!relaxed.includes('opening_round INTEGER')) throw new Error('Unexpected seasons schema while migrating mid-season rules');
+    const columns = [...current].join(',');
+    db.exec('PRAGMA foreign_keys=OFF');
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      db.exec(relaxed);
+      db.exec(`INSERT INTO seasons_midseason(${columns}) SELECT ${columns} FROM seasons`);
+      db.exec('DROP TABLE seasons; ALTER TABLE seasons_midseason RENAME TO seasons;');
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    } finally {
+      db.exec('PRAGMA foreign_keys=ON');
+    }
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    if (violations.length) throw new Error('Foreign keys invalid after mid-season migration');
+  }
+  if (!cols('seasons').has('expected_races')) db.exec('ALTER TABLE seasons ADD COLUMN expected_races INTEGER NOT NULL DEFAULT 0');
+  const tournamentCols = cols('tournaments');
+  if (!tournamentCols.has('launch_opening_round')) db.exec('ALTER TABLE tournaments ADD COLUMN launch_opening_round INTEGER NOT NULL DEFAULT 1');
+  if (!tournamentCols.has('launch_expected_races')) db.exec('ALTER TABLE tournaments ADD COLUMN launch_expected_races INTEGER NOT NULL DEFAULT 0');
+  if (!tournamentCols.has('launch_year')) db.exec('ALTER TABLE tournaments ADD COLUMN launch_year INTEGER');
+  const policyCols = cols('platform_finance');
+  if (!policyCols.has('allow_public_midseason')) db.exec('ALTER TABLE platform_finance ADD COLUMN allow_public_midseason INTEGER NOT NULL DEFAULT 1');
+  if (!policyCols.has('max_active_owned_pools')) db.exec('ALTER TABLE platform_finance ADD COLUMN max_active_owned_pools INTEGER NOT NULL DEFAULT 3');
+  const mailCols = cols('email_outbox');
+  if (!mailCols.has('priority')) db.exec('ALTER TABLE email_outbox ADD COLUMN priority INTEGER NOT NULL DEFAULT 50');
+  db.exec(`CREATE TABLE IF NOT EXISTS openf1_cache (
+    cache_key TEXT PRIMARY KEY,endpoint TEXT NOT NULL,content TEXT NOT NULL,
+    updated_at TEXT NOT NULL,expires_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_openf1_cache_expiry ON openf1_cache(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_midseason_owned ON tournaments(owner_id,status);`);
+  db.exec(`UPDATE email_outbox SET priority=100 WHERE event_key LIKE 'locked:%' OR event_key LIKE 'result:%' OR event_key LIKE 'champions:%' OR event_key LIKE 'verify:%'`);
+  db.exec(`UPDATE email_outbox SET priority=10 WHERE event_key LIKE 'invited:%' OR event_key LIKE 'invite:%'`);
+}
+migrateMidseason();
+
 
 export type Row = Record<string, any>;
 /**

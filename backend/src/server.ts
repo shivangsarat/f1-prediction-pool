@@ -10,6 +10,7 @@ import {queueNotification, requestEmailVerification, confirmEmail, mailProvider,
 import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
 import {financePlan, grossFromEntries} from './finance.ts';
 import {platformPolicy, updatePlatformPolicy, seasonFinanceConfig, snapshotFinance, financeProjection, tournamentTerms, validateSeasonFinanceChanges} from './financeStore.ts';
+import {openingQualifying, midseasonPreview, scaledSeasonPoints, validateMidseasonConfiguration} from './midseason.ts';
 
 // A production instance must be able to make encrypted backups before accepting payments or picks.
 if (process.env.NODE_ENV === 'production' && !/^[a-fA-F0-9]{64}$/.test(process.env.BACKUP_ENCRYPTION_KEY ?? '')) {
@@ -71,7 +72,7 @@ function season(id: string, user?: User) {
  * @param user - The currently authenticated participant.
  */
 function weekend(id: string, user?: User) {
-  const v = get('SELECT w.*,s.tournament_id,s.sprint_mode,s.preseason_lock,s.salvage_start,s.salvage_end,s.year FROM weekends w JOIN seasons s ON s.id=w.season_id WHERE w.id=?', id);
+  const v = get('SELECT w.*,s.tournament_id,s.sprint_mode,s.preseason_lock,s.salvage_start,s.salvage_end,s.year,s.championship_enabled,s.salvage_enabled FROM weekends w JOIN seasons s ON s.id=w.season_id WHERE w.id=?', id);
   if (!v) throw new HttpError(404, 'Weekend not found');
   if (user) requireTournament(user, v.tournament_id);
   return v
@@ -91,8 +92,33 @@ function formLock(w: any, form: FormKind) {
  */
 function seasonIsLocked(s: any): boolean {
   const w = get('SELECT * FROM weekends WHERE season_id=? ORDER BY round LIMIT 1', s.id);
-  return !!w && locked(w.is_sprint ? w.sprint_qualifying_at : w.qualifying_at)
+  return !!w && locked(openingQualifying(w as any));
 }
+/** Calculate a championship pick deadline from the local tournament's opening round. */
+function openingLockForSeason(s: any): string | null {
+  const first = get('SELECT * FROM weekends WHERE season_id=? ORDER BY round LIMIT 1', s.id);
+  return first ? openingQualifying(first as any) : s.preseason_lock;
+}
+
+/** Derive the mid-season calendar's current size and August eligibility from persisted data. */
+function seasonScopeState(s: any) {
+  const weekends = all('SELECT * FROM weekends WHERE season_id=? ORDER BY round', s.id);
+  const first = weekends[0];
+  const actual = weekends.length;
+  const expected = s.expected_races || actual;
+  const beforeAugust = weekends.filter(w => new Date(w.race_at).getUTCMonth() < 7).length;
+  const startsBeforeAugust = first ? new Date(openingQualifying(first)).getUTCMonth() < 7 : true;
+  return {weekends, actual, expected, beforeAugust, startsBeforeAugust,
+    ...midseasonPreview(s.opening_round ?? 1, actual || expected, startsBeforeAugust, beforeAugust)};
+}
+
+/** Prevent post-lock withdrawals from another pool by blocking negative transfers and refunds. */
+function enforceLockedBuyins(s: any, type: string, signed: number): void {
+  if (seasonIsLocked(s) && (type === 'refund' || (type === 'adjustment' && signed < 0))) {
+    throw new HttpError(409, 'Locked buy-ins cannot be withdrawn or transferred to another tournament');
+  }
+}
+
 /**
  * Validate form shape and verify every driver/team against the season roster.
  * @param w - Input to this operation.
@@ -237,6 +263,8 @@ function standingRows(seasonId: string): Array<RankingRow & {name: string; salva
   const raceRows = all(`SELECT sc.* FROM score_snapshots sc JOIN weekends w ON w.id=sc.weekend_id
  WHERE w.season_id=? AND sc.result_version=(SELECT MAX(v.result_version) FROM score_snapshots v WHERE v.weekend_id=sc.weekend_id AND v.user_id=sc.user_id)`, seasonId);
   const s = season(seasonId), champ = get('SELECT * FROM champions WHERE season_id=?', seasonId);
+  const rounds = get('SELECT COUNT(*) AS n FROM weekends WHERE season_id=?', seasonId)?.n ?? 0;
+  const points = scaledSeasonPoints(s.opening_round ?? 1, rounds);
   return users.map(u => {
 
     const scores = raceRows.filter(r => r.user_id === u.id), base = scores.reduce((t, r) => t + r.points, 0);
@@ -245,8 +273,8 @@ function standingRows(seasonId: string): Array<RankingRow & {name: string; salva
 
       const orig = preSeasonPick(seasonId, u.id, cat, 'preseason'), latest = preSeasonPick(seasonId, u.id, cat);
       const changed = !!(orig && latest && orig.choice !== latest.choice && latest.phase === 'salvage');
-      if (changed && locked(s.salvage_end)) penalty -= 15;
-      if (champ && latest?.choice === champ[cat]) champPts += 25;
+      if (s.salvage_enabled && changed && s.salvage_end && locked(s.salvage_end)) penalty -= points.salvagePenalty;
+      if (s.championship_enabled && champ && latest?.choice === champ[cat]) champPts += points.championshipBonus;
     }
     return {userId: u.id, name: u.display_name, total: base + penalty + champPts, exactPodiums: scores.reduce((t, r) => t + r.exact_podiums, 0), exactTop10: scores.reduce((t, r) => t + r.exact_top10, 0), propPoints: scores.reduce((t, r) => t + r.prop_points, 0), bestWeek: Math.max(0, ...scores.map(r => r.points)), salvagePenalty: penalty, championshipPoints: champPts};
   });
@@ -313,7 +341,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     return reply(res, verified ? 200 : 400, {verified});
   }
   if (method === 'GET' && p === '/api/email/capabilities') return reply(res, 200, {available: mailProvider() !== 'none'});
-  if (method === 'GET' && p === '/api/catalogue') return reply(res, 200, publicCatalogue(url.searchParams.get('q') ?? ''));
+  if (method === 'GET' && p === '/api/catalogue') return reply(res, 200, publicCatalogue(url.searchParams.get('q') ?? '', (url.searchParams.get('scope') ?? 'all') as 'all' | 'full' | 'mid'));
   if (method === 'GET' && parts[1] === 'invite-preview' && parts.length === 3) return reply(res, 200, invitePreview(parts[2]));
   if (method === 'POST' && p === '/api/auth/register') {
     const key = `register:${clientIp(req)}`;
@@ -335,12 +363,17 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   const user = auth(req);
   if (method === 'GET' && p === '/api/auth/me') return reply(res, 200, {...user, emailVerified: !!get('SELECT email_verified_at FROM users WHERE id=?', user.id)?.email_verified_at, notificationOptIn: !!get('SELECT notification_opt_in FROM users WHERE id=?', user.id)?.notification_opt_in});
   if (method === 'GET' && p === '/api/finance-policy') return reply(res, 200, platformPolicy());
+  if (method === 'GET' && p === '/api/season-scope') {
+    const id = url.searchParams.get('seasonId');
+    if (!id) throw bad('seasonId required');
+    return reply(res, 200, seasonScopeState(requireSeasonMember(user, id)));
+  }
   if (p === '/api/operator/finance') {
     if (user.role !== 'admin') throw new HttpError(403, 'Global operator access required');
     if (method === 'GET') return reply(res, 200, platformPolicy());
     if (method === 'PATCH') {
       const b = await body(req);
-      const allowed = ['platformRakeEnabled', 'platformRakeBps', 'allowTournamentHouseRake'];
+      const allowed = ['platformRakeEnabled', 'platformRakeBps', 'allowTournamentHouseRake', 'allowPublicMidseason', 'maxActiveOwnedPools'];
       if (Object.keys(b).some(key => !allowed.includes(key))) throw bad('Unknown operator policy field');
       try {
         const policy = updatePlatformPolicy(b);
@@ -381,7 +414,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   }
   if (method === 'POST' && p === '/api/tournaments') {
     const b = await body(req);
-    const created = createTournament(user, b.name, b.description, b.visibility ?? 'invite_only');
+    const created = createTournament(user, b.name, b.description, b.visibility ?? 'invite_only', {openingRound: b.openingRound, expectedRaces: b.expectedRaces, year: b.year});
     notifySafely(user.id, `created:${created.id}:${user.id}`, created.id, `Tournament created: ${created.name}`, `Your new GRIDLOCK tournament is ready.\n${publicUrl()}/?tournament=${created.id}`);
     return reply(res, 201, created)
   }
@@ -431,7 +464,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   }
   if (method === 'GET' && parts[1] === 'seasons' && parts.length === 3) {
     const s = season(parts[2], user);
-    return reply(res, 200, {...s, configLocked: seasonIsLocked(s), finance: seasonFinanceConfig(s.id), champions: get('SELECT wdc,wcc,published_at FROM champions WHERE season_id=?', s.id) ?? null})
+    return reply(res, 200, {...s, configLocked: seasonIsLocked(s), scope: seasonScopeState(s), finance: seasonFinanceConfig(s.id), champions: get('SELECT wdc,wcc,published_at FROM champions WHERE season_id=?', s.id) ?? null})
   }
   if (method === 'GET' && p === '/api/weekends') {
     const s = url.searchParams.get('seasonId');
@@ -499,7 +532,8 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const s = url.searchParams.get('seasonId');
     if (!s) throw bad('seasonId required');
     const seasonData = season(s, user);
-    const visible = locked(seasonData.preseason_lock);
+    const opening = get('SELECT * FROM weekends WHERE season_id=? ORDER BY round LIMIT 1', s);
+    const visible = opening ? locked(openingQualifying(opening as any)) : !!seasonData.preseason_lock && locked(seasonData.preseason_lock);
     const rows = all('SELECT * FROM champion_picks WHERE season_id=? ORDER BY version DESC', s), seen = new Set<string>();
     return reply(res, 200, rows.filter(r => {
       const k = r.user_id + ':' + r.category;
@@ -511,7 +545,12 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   if (method === 'PUT' && p === '/api/championship-picks') {
 
     const b = await body(req), s = season(b.seasonId, user), date = now();
-    const isPre = !locked(s.preseason_lock), isSalvage = locked(s.salvage_start) && !locked(s.salvage_end);
+    if (!s.championship_enabled) throw new HttpError(409, 'Championship predictions are disabled for this tournament');
+    const firstRound = get('SELECT * FROM weekends WHERE season_id=? ORDER BY round LIMIT 1', s.id);
+    const openingLock = firstRound ? openingQualifying(firstRound as any) : s.preseason_lock;
+    if (!openingLock) throw new HttpError(409, 'Configure the first scheduled round before submitting championship picks');
+    const isPre = !locked(openingLock);
+    const isSalvage = !!s.salvage_enabled && !!s.salvage_start && !!s.salvage_end && locked(s.salvage_start) && !locked(s.salvage_end);
     if (!isPre && !isSalvage) throw new HttpError(409, 'Championship picks are currently locked');
     if (!['wdc', 'wcc'].includes(b.category) || !validId(b.choice)) throw bad('Choose a valid category and driver/constructor');
     if (b.category === 'wdc' && !get('SELECT 1 FROM roster WHERE season_id=? AND id=?', s.id, b.choice)) throw bad('Unknown WDC driver');
@@ -527,30 +566,52 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   }
   if (!p.startsWith('/api/admin/')) throw new HttpError(404, 'Route not found');
   if (method === 'POST' && p === '/api/admin/seasons') {
-
     const b = await body(req);
     const year = int(b.year, 2023, 2200), sId = id();
-    requireCommissioner(user, b.tournamentId);
+    const tournament = requireCommissioner(user, b.tournamentId);
+    const openingRound = int(b.openingRound ?? tournament.launch_opening_round ?? 1, 1, 40);
+    const expectedRaces = int(b.expectedRaces ?? (tournament.launch_expected_races || (openingRound === 1 ? 24 : 0)), 0, 40);
+    const champEnabled = b.championshipEnabled === undefined ? openingRound === 1 : b.championshipEnabled;
+    const salvageEnabled = b.salvageEnabled === undefined ? openingRound === 1 : b.salvageEnabled;
+    if (typeof champEnabled !== 'boolean' || typeof salvageEnabled !== 'boolean') throw bad('Championship and salvage settings must be booleans');
+    if (openingRound > 1 && tournament.visibility === 'public' && !platformPolicy().allowPublicMidseason && user.role !== 'admin') {
+      throw new HttpError(403, 'Operator disabled public mid-season tournament creation; choose invite-only');
+    }
     if (!['one-form', 'two-form'].includes(b.sprintMode ?? 'two-form')) throw bad('Invalid sprint mode');
     const currency = String(b.currency ?? 'EUR').toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) throw bad('Three-letter currency required');
-    const base = int(b.baseEntryCents ?? 1000, 1, 10000000), small = int(b.smallMax ?? 5, 3, 100), medium = int(b.mediumMax ?? 10, small + 1, 200);
-    const pre = asUTC(b.preseasonLock, 'Preseason lock'), sStart = asUTC(b.salvageStart, 'Salvage start'), sEnd = asUTC(b.salvageEnd, 'Salvage end');
-    if (Date.parse(sEnd) - Date.parse(sStart) !== 7 * 86400000 || new Date(sStart).getUTCMonth() !== 7 || new Date(sEnd).getUTCMonth() !== 7) throw bad('Salvage window must be exactly 7 days entirely within August (UTC)');
+    const base = int(b.baseEntryCents ?? 1000, 0, 10000000);
+    const small = int(b.smallMax ?? 5, 3, 100), medium = int(b.mediumMax ?? 10, small + 1, 200);
+    const pre = champEnabled && b.preseasonLock ? asUTC(b.preseasonLock, 'Opening championship lock') : null;
+    const sStart = salvageEnabled ? asUTC(b.salvageStart, 'Salvage start') : null;
+    const sEnd = salvageEnabled ? asUTC(b.salvageEnd, 'Salvage end') : null;
+    if (salvageEnabled && (Date.parse(sEnd!) - Date.parse(sStart!) !== 7 * 86400000 || new Date(sStart!).getUTCMonth() !== 7 || new Date(sEnd!).getUTCMonth() !== 7)) {
+      throw bad('Salvage window must be seven days inside August UTC');
+    }
+    if (openingRound === 1 && (expectedRaces < 20 || expectedRaces > 24)) throw bad('Full seasons must configure the complete 20–24-round F1 calendar');
+    if (openingRound > 1 && expectedRaces === 0 && base > 0) throw bad('Mid-season paid setup requires the remaining-race count from the calendar preview');
+    if (expectedRaces > 0 && expectedRaces < 3 && base > 0) throw new HttpError(409, 'Paid tournaments need at least three future races');
+    if (openingRound > 1 && champEnabled && expectedRaces < 10) throw bad('Mid-season championship picks need at least ten remaining races');
+    if (salvageEnabled && !champEnabled) throw bad('Salvage requires enabled championship picks');
     try {
       return reply(res, 201, transaction(() => {
-        run('INSERT INTO seasons(id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,preseason_lock,salvage_start,salvage_end,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', sId, year, String(b.name ?? `F1 ${year}`), b.tournamentId, b.sprintMode ?? 'two-form', currency, base, small, medium, pre, sStart, sEnd, now());
+        run(`INSERT INTO seasons(id,year,name,tournament_id,sprint_mode,currency,base_entry_cents,small_max,medium_max,
+          preseason_lock,salvage_start,salvage_end,created_at,championship_enabled,salvage_enabled,opening_round,expected_races)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, sId, year, String(b.name ?? `F1 ${year}`), b.tournamentId,
+          b.sprintMode ?? 'two-form', currency, base, small, medium, pre, sStart, sEnd, now(),
+          Number(champEnabled), Number(salvageEnabled), openingRound, expectedRaces);
         const settings = validateSeasonFinanceChanges(sId, b);
         run(`UPDATE seasons SET payout_model=?,house_rake_enabled=?,house_rake_bps=?,poker_floor_enabled=?,poker_itm_pct=?,poker_alpha_mode=?,poker_alpha_manual=? WHERE id=?`,
           settings.payoutModel, Number(settings.houseRakeEnabled), settings.houseRakeBps, Number(settings.pokerFloorEnabled), settings.pokerItmPct, settings.pokerAlphaMode, settings.pokerAlphaManual, sId);
-        audit(user.id, 'season.create', sId);
-        return {id: sId}
-      }))
-    } catch (e: any) {
-      if (/UNIQUE/.test(String(e))) throw new HttpError(409, 'Season already exists');
-      if (e instanceof HttpError) throw e;
-      if (/rake|poker|payout|ITM|alpha|configuration/i.test(String(e))) throw bad((e as Error).message);
-      throw e;
+        run('UPDATE tournaments SET launch_opening_round=?,launch_expected_races=?,launch_year=? WHERE id=?', openingRound, expectedRaces, year, b.tournamentId);
+        audit(user.id, 'season.create', sId, '', {openingRound, expectedRaces, champEnabled, salvageEnabled});
+        return {id: sId};
+      }));
+    } catch (error) {
+      if (/UNIQUE/.test(String(error))) throw new HttpError(409, 'Season already exists');
+      if (error instanceof HttpError) throw error;
+      if (/rake|poker|payout|ITM|alpha|configuration/i.test(String(error))) throw bad((error as Error).message);
+      throw error;
     }
   }
   if (method === 'PATCH' && parts[2] === 'seasons' && parts.length === 4) {
@@ -560,12 +621,30 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const b = await body(req);
     const patch = {sprint_mode: b.sprintMode ?? s.sprint_mode, base_entry_cents: b.baseEntryCents ?? s.base_entry_cents, small_max: b.smallMax ?? s.small_max, medium_max: b.mediumMax ?? s.medium_max};
     if (!['two-form', 'one-form'].includes(patch.sprint_mode)) throw bad('Invalid mode');
-    int(patch.base_entry_cents, 1);
+    int(patch.base_entry_cents, 0);
     int(patch.small_max, 3, 100);
     int(patch.medium_max, patch.small_max + 1, 200);
     try {
       return reply(res, 200, transaction(() => {
-        run('UPDATE seasons SET sprint_mode=?,base_entry_cents=?,small_max=?,medium_max=? WHERE id=?', patch.sprint_mode, patch.base_entry_cents, patch.small_max, patch.medium_max, s.id);
+        const champEnabled = b.championshipEnabled ?? !!s.championship_enabled;
+        const salvageEnabled = b.salvageEnabled ?? !!s.salvage_enabled;
+        if (typeof champEnabled !== 'boolean' || typeof salvageEnabled !== 'boolean') throw bad('Invalid championship options');
+        if (salvageEnabled && !champEnabled) throw bad('Salvage requires championship predictions');
+        const openingRound = b.openingRound === undefined ? s.opening_round : int(b.openingRound, 1, 40);
+        const expectedRaces = b.expectedRaces === undefined ? s.expected_races : int(b.expectedRaces, 0, 40);
+        if (get('SELECT 1 FROM weekends WHERE season_id=? LIMIT 1', s.id) && openingRound !== s.opening_round) throw new HttpError(409, 'Opening round cannot change after calendar setup');
+        if (openingRound > 1 && expectedRaces < 3 && patch.base_entry_cents > 0) throw bad('Paid mid-season tournaments require at least three future races');
+        if (openingRound > 1 && champEnabled && expectedRaces < 10) throw bad('Scaled championships require ten or more pre-August races');
+        if (openingRound > 1 && !platformPolicy().allowPublicMidseason && user.role !== 'admin'
+          && get('SELECT visibility FROM tournaments WHERE id=?', s.tournament_id)?.visibility === 'public') throw new HttpError(403, 'Public mid-season tournaments are disabled by the operator');
+        const pre = champEnabled ? (b.preseasonLock ? asUTC(b.preseasonLock, 'Opening lock') : s.preseason_lock) : null;
+        const salvageStart = salvageEnabled ? (b.salvageStart ? asUTC(b.salvageStart, 'Salvage start') : s.salvage_start) : null;
+        const salvageEnd = salvageEnabled ? (b.salvageEnd ? asUTC(b.salvageEnd, 'Salvage end') : s.salvage_end) : null;
+        if (salvageEnabled && (!salvageStart || !salvageEnd || Date.parse(salvageEnd) - Date.parse(salvageStart) !== 7 * 86400000 || new Date(salvageStart).getUTCMonth() !== 7 || new Date(salvageEnd).getUTCMonth() !== 7)) throw bad('Salvage window must be seven August days');
+        run('UPDATE seasons SET sprint_mode=?,base_entry_cents=?,small_max=?,medium_max=?,championship_enabled=?,salvage_enabled=?,opening_round=?,expected_races=?,preseason_lock=?,salvage_start=?,salvage_end=? WHERE id=?',
+          patch.sprint_mode, patch.base_entry_cents, patch.small_max, patch.medium_max, Number(champEnabled), Number(salvageEnabled), openingRound, expectedRaces, pre, salvageStart, salvageEnd, s.id);
+        run('UPDATE tournaments SET launch_opening_round=?,launch_expected_races=? WHERE id=?', openingRound, expectedRaces, s.tournament_id);
+        audit(user.id, 'season.scope', s.id, '', {openingRound, expectedRaces, champEnabled, salvageEnabled});
         const finance = validateSeasonFinanceChanges(s.id, b);
         run(`UPDATE seasons SET payout_model=?,house_rake_enabled=?,house_rake_bps=?,poker_floor_enabled=?,poker_itm_pct=?,poker_alpha_mode=?,poker_alpha_manual=? WHERE id=?`,
           finance.payoutModel, Number(finance.houseRakeEnabled), finance.houseRakeBps, Number(finance.pokerFloorEnabled), finance.pokerItmPct, finance.pokerAlphaMode, finance.pokerAlphaManual, s.id);
@@ -611,10 +690,16 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const sprintQual = isSprint ? asUTC(b.sprintQualifyingAt, 'Sprint qualifying') : null;
     if ((isSprint && Date.parse(sprintQual!) >= Date.parse(qual)) || Date.parse(qual) >= Date.parse(race)) throw bad('Session dates must be ordered');
     const lock = isSprint ? sprintQual! : qual;
-    if (round === 1 && Date.parse(s.preseason_lock) > Date.parse(lock)) throw bad('Preseason lock must be on/before Round 1 qualifying lock');
+    if (round < s.opening_round) throw bad('Round precedes this tournament’s opening round');
+    if (s.opening_round > 1 && Date.parse(lock) <= Date.parse(s.created_at)) throw bad('Mid-season calendars require upcoming qualifying sessions');
+    if (seasonIsLocked(s)) throw new HttpError(409, 'Cannot change calendar after the opening round locks');
+    if (s.championship_enabled && s.preseason_lock && round === s.opening_round && Date.parse(s.preseason_lock) > Date.parse(lock)) throw bad('Championship lock must be no later than opening qualifying');
     const wId = id();
     return reply(res, 201, transaction(() => {
       run('INSERT INTO weekends VALUES(?,?,?,?,?,?,?,?,?,?,?)', wId, s.id, round, String(b.name ?? `Round ${round}`), Number(isSprint), qual, sprintQual, race, b.chequeredAt ? asUTC(b.chequeredAt, 'Chequered flag') : null, toJSON(b.openf1Keys ?? {}), now());
+      const scope = seasonScopeState(s);
+      if (s.opening_round > 1 && s.championship_enabled && !scope.startsBeforeAugust) throw bad('Mid-season championship picks require an opening round before August');
+      if (s.opening_round > 1 && s.salvage_enabled && scope.actual === s.expected_races && scope.beforeAugust < 4) throw bad('Mid-season August salvage requires four scheduled rounds finishing before August');
       audit(user.id, 'weekend.create', wId);
       return {id: wId}
     }));
@@ -636,6 +721,21 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       return {count: rows.length, drivers: rows};
     }));
   }
+  if (method === 'GET' && p === '/api/calendar/remaining') {
+    const year = int(Number(url.searchParams.get('year')), 2023, 2200);
+    const currentYear = new Date().getUTCFullYear();
+    if (year < currentYear - 1 || year > currentYear + 3) throw bad('Calendar preview is available for the current or adjacent F1 years');
+    const {rateLimit, recordFailedAttempt} = await import('./auth.ts');
+    const previewKey = `openf1-preview:${user.id}`;
+    rateLimit(previewKey, 30, 60);
+    recordFailedAttempt(previewKey);
+    const [sessions, meetings] = await Promise.all([queryOpenF1('sessions', {year}), queryOpenF1('meetings', {year})]);
+    const allEvents = calendarFromSessions(sessions, meetings);
+    const upcoming = allEvents.filter(event => Date.parse(event.isSprint ? event.sprintQualifyingAt : event.qualifyingAt) > Date.now());
+    return reply(res, 200, {year, openingRound: upcoming[0]?.round ?? null, expectedRaces: upcoming.length,
+      upcomingOnly: true, scope: upcoming.length && upcoming[0].round > 1 ? 'mid' : 'full',
+      events: upcoming});
+  }
   if (method === 'POST' && p === '/api/admin/openf1/calendar') {
 
     const b = await body(req);
@@ -648,13 +748,17 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
 
     const b = await body(req), s = requireSeasonCommissioner(user, b.seasonId);
     if (!Array.isArray(b.events) || b.events.length > 40) throw bad('Expected events from calendar preview');
+    if (seasonIsLocked(s)) throw new HttpError(409, 'Calendar is locked at the opening qualifying deadline');
+    const minRound = int(b.startFromRound ?? s.opening_round, s.opening_round, 40);
     return reply(res, 200, transaction(() => {
 
       let created = 0, unchanged = 0;
       for (const e of b.events) {
 
         const rnd = int(e.round, 1, 40), qual = asUTC(e.qualifyingAt, 'qualifying'), race = asUTC(e.raceAt, 'race'), sprint = !!e.isSprint, sp = sprint ? asUTC(e.sprintQualifyingAt, 'sprint qualifying') : null;
-        if (rnd === 1 && Date.parse(s.preseason_lock) > Date.parse(sprint ? sp! : qual)) throw bad('Preseason lock must be on/before Round 1 qualifying lock');
+        const lock = sprint ? sp! : qual;
+        if (rnd < minRound || (s.opening_round > 1 || b.upcomingOnly === true) && Date.parse(lock) <= Date.parse(s.created_at)) {unchanged++; continue;}
+        if (s.championship_enabled && s.preseason_lock && rnd === s.opening_round && Date.parse(s.preseason_lock) > Date.parse(lock)) throw bad('Championship lock cannot follow the opening qualifying lock');
         if (get('SELECT id FROM weekends WHERE season_id=? AND round=?', s.id, rnd)) {
           unchanged++;
           continue
@@ -663,7 +767,11 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
         run('INSERT INTO weekends VALUES(?,?,?,?,?,?,?,?,?,?,?)', wId, s.id, rnd, String(e.name), Number(sprint), qual, sp, race, null, toJSON(e.openf1Keys ?? {}), now());
         created++;
       }
-      audit(user.id, 'calendar.import', s.id, '', {created, unchanged});
+      const calendar = seasonScopeState(s);
+      if (s.opening_round > 1 && s.expected_races && calendar.actual > s.expected_races) throw bad('Imported more rounds than the configured remaining-race count');
+      if (s.championship_enabled && s.opening_round > 1 && (calendar.expected < 10 || !calendar.startsBeforeAugust)) throw bad('Scaled championship picks require a pre-August start with ten or more rounds');
+      if (s.salvage_enabled && s.opening_round > 1 && calendar.actual >= s.expected_races && calendar.beforeAugust < 4) throw bad('Mid-season salvage requires at least four rounds finishing before August');
+      audit(user.id, 'calendar.import', s.id, '', {created, unchanged, scope: calendar.label});
       return {created, unchanged};
     }));
   }
@@ -777,6 +885,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const signed = ['refund', 'payout', 'platform_rake', 'house_rake'].includes(type) ? -amount : (type === 'adjustment' && b.amountCents < 0 ? -amount : amount);
     const ownerId = get('SELECT owner_id FROM tournaments WHERE id=?', s.tournament_id)?.owner_id;
     const recipient = type === 'platform_rake' ? user.id : type === 'house_rake' ? ownerId : (b.userId ?? null);
+    if (s.base_entry_cents === 0 && ['buyin', 'adjustment', 'refund', 'payout', 'platform_rake', 'house_rake'].includes(type)) throw new HttpError(409, 'Free tournament ledgers cannot record financial entries');
     if (type === 'platform_rake' && user.role !== 'admin') throw new HttpError(403, 'Only the global operator can record platform rake');
     if (type === 'house_rake' && !ownerId) throw new HttpError(409, 'Tournament creator is not configured');
     if (['buyin', 'refund', 'payout'].includes(type) && !recipient) throw bad('Buy-in, refund and player payout must identify a participant');
@@ -789,6 +898,16 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       if (existing) {
         if (existing.season_id !== s.id || existing.user_id !== recipient || existing.amount_cents !== signed || existing.type !== type) throw new HttpError(409, 'Idempotency key already used for a different transaction');
         return {...existing, replayed: true};
+      }
+      enforceLockedBuyins(s, type, signed);
+      if (type === 'buyin' && s.opening_round > 1) {
+        const scope = seasonScopeState(s);
+        if (scope.expected < 3 || scope.actual < 3 || scope.actual !== scope.expected || scope.weekends[0]?.round !== s.opening_round) {
+          throw new HttpError(409, 'Import the complete upcoming calendar (at least three rounds) before accepting paid mid-season entries');
+        }
+        validateMidseasonConfiguration({openingRound:s.opening_round,scheduledRaces:scope.actual,
+          baseEntryCents:s.base_entry_cents,championshipEnabled:!!s.championship_enabled,salvageEnabled:!!s.salvage_enabled,
+          startsBeforeAugust:scope.startsBeforeAugust,completedBeforeAugust:scope.beforeAugust});
       }
       const summary = ledgerSummary(s.id);
       const plan = payoutSnapshot(s);
@@ -828,15 +947,15 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
   if (method === 'POST' && p === '/api/admin/champions') {
 
     const b = await body(req), s = requireSeasonCommissioner(user, b.seasonId);
-    if (!validId(b.wdc) || !validId(b.wcc) || !get('SELECT 1 FROM roster WHERE season_id=? AND id=?', s.id, b.wdc) || !get('SELECT 1 FROM roster WHERE season_id=? AND team_id=?', s.id, b.wcc)) throw bad('Invalid champions');
-    if (!locked(s.salvage_end)) throw new HttpError(409, 'Cannot finalize championships before summer break');
+    if (s.championship_enabled && (!validId(b.wdc) || !validId(b.wcc) || !get('SELECT 1 FROM roster WHERE season_id=? AND id=?', s.id, b.wdc) || !get('SELECT 1 FROM roster WHERE season_id=? AND team_id=?', s.id, b.wcc))) throw bad('Invalid champions');
+    if (s.salvage_enabled && (!s.salvage_end || !locked(s.salvage_end))) throw new HttpError(409, 'Wait until summer salvage closes before finalizing');
     const last = get('SELECT race_at FROM weekends WHERE season_id=? ORDER BY round DESC LIMIT 1', s.id);
     if (!last || !locked(last.race_at)) throw new HttpError(409, 'Season is not finished yet');
     if (get('SELECT COUNT(*) AS n FROM weekends w LEFT JOIN results r ON r.weekend_id=w.id WHERE w.season_id=? AND r.published_at IS NULL', s.id)?.n > 0) throw new HttpError(409, 'Publish all round results before the championship');
     return reply(res, 200, transaction(() => {
 
       if (get('SELECT 1 FROM champions WHERE season_id=?', s.id)) throw new HttpError(409, 'Championship has already been published');
-      run('INSERT INTO champions VALUES(?,?,?,?,?)', s.id, b.wdc, b.wcc, now(), user.id);
+      run('INSERT INTO champions VALUES(?,?,?,?,?)', s.id, s.championship_enabled ? b.wdc : '', s.championship_enabled ? b.wcc : '', now(), user.id);
       audit(user.id, 'championship.publish', s.id, '', {wdc: b.wdc, wcc: b.wcc});
       const ranks = rankWithTies(standingRows(s.id));
       const payouts = payoutSnapshot(s);

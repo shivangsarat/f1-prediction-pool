@@ -1,6 +1,7 @@
 import {createHash, randomBytes, randomUUID, createCipheriv, createDecipheriv} from 'node:crypto';
 import {all, get, run, transaction} from './db.ts';
 import {HttpError, bad, type User} from './auth.ts';
+import {notificationPriority} from './midseason.ts';
 
 /** Transactional email providers supported without a paid SDK dependency. */
 export type MailProvider = 'none' | 'gmail' | 'brevo' | 'resend';
@@ -64,9 +65,9 @@ export function queueNotification(userId: string, eventKey: string, tournamentId
   const recipient = get('SELECT email,email_verified_at,notification_opt_in FROM users WHERE id=?', userId);
   if (!recipient?.email_verified_at || recipient.notification_opt_in !== 1 || !validAddress(recipient.email)) return false;
   const at = new Date().toISOString();
-  const result = run(`INSERT OR IGNORE INTO email_outbox(id,event_key,user_id,tournament_id,subject,body,created_at,next_attempt_at)
-    VALUES(?,?,?,?,?,?,?,?)`, randomUUID(), eventKey, userId, tournamentId,
-    safeMailText(subject, 180).replace(/[\r\n]/g, ' '), encryptMail(safeMailText(message)), at, at);
+  const result = run(`INSERT OR IGNORE INTO email_outbox(id,event_key,user_id,tournament_id,subject,body,created_at,next_attempt_at,priority)
+    VALUES(?,?,?,?,?,?,?,?,?)`, randomUUID(), eventKey, userId, tournamentId,
+    safeMailText(subject, 180).replace(/[\r\n]/g, ' '), encryptMail(safeMailText(message)), at, at, notificationPriority(eventKey));
   return result.changes > 0;
 }
 
@@ -83,9 +84,9 @@ export function requestEmailVerification(user: User): void {
   const expires = new Date(Date.now() + 24 * 3600000).toISOString();
   transaction(() => {
     run('INSERT INTO email_verifications VALUES(?,?,?,?)', createHash('sha256').update(token).digest('hex'), user.id, expires, at);
-    run(`INSERT INTO email_outbox(id,event_key,user_id,tournament_id,subject,body,created_at,next_attempt_at)
-      VALUES(?,?,?,?,?,?,?,?)`, randomUUID(), `verify:${user.id}:${at}`, user.id, null,
-      'Verify your GRIDLOCK email', encryptMail(`Confirm your account email within 24 hours:\n${publicUrl()}/?verify=${encodeURIComponent(token)}\n\nIf you did not create an account, ignore this message.`), at, at);
+    run(`INSERT INTO email_outbox(id,event_key,user_id,tournament_id,subject,body,created_at,next_attempt_at,priority)
+      VALUES(?,?,?,?,?,?,?,?,?)`, randomUUID(), `verify:${user.id}:${at}`, user.id, null,
+      'Verify your GRIDLOCK email', encryptMail(`Confirm your account email within 24 hours:\n${publicUrl()}/?verify=${encodeURIComponent(token)}\n\nIf you did not create an account, ignore this message.`), at, at, notificationPriority(`verify:${user.id}:${at}`));
   });
 }
 
@@ -168,7 +169,7 @@ export async function drainEmailOutbox(limit = 10): Promise<{sent: number; faile
   const rows = transaction(() => {
     const jobs = all(`SELECT e.id,e.user_id,e.subject,e.body,u.email FROM email_outbox e JOIN users u ON u.id=e.user_id
       WHERE e.delivered_at IS NULL AND e.attempts<7 AND e.next_attempt_at<=?
-      AND (e.claimed_until IS NULL OR e.claimed_until<=?) ORDER BY e.created_at LIMIT ?`, now, now, Math.min(limit, 50));
+      AND (e.claimed_until IS NULL OR e.claimed_until<=?) ORDER BY e.priority DESC,e.created_at ASC LIMIT ?`, now, now, Math.min(limit, 50));
     for (const j of jobs) run('UPDATE email_outbox SET claimed_until=? WHERE id=?', lease, j.id);
     return jobs;
   });

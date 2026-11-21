@@ -33,3 +33,11 @@ it('searches for public competitions', async () => {
   fireEvent.change(screen.getByLabelText('Search public tournaments'), {target: {value: 'monaco'}});
   await waitFor(() => expect(get).toHaveBeenCalledWith('/catalogue?q=monaco'));
 });
+
+/** Full and mid-season catalogue filters request only the selected public scope. */
+it('filters public catalogue by mid-season scope', async () => {
+  vi.mocked(get).mockResolvedValue([]);
+  render(<TournamentCatalogue signedIn={false} onJoin={vi.fn()} onBack={vi.fn()}/>);
+  fireEvent.change(screen.getByLabelText('Filter tournament scope'), {target:{value:'mid'}});
+  await waitFor(() => expect(get).toHaveBeenCalledWith('/catalogue?q=&scope=mid'));
+});

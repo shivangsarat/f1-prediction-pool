@@ -84,3 +84,8 @@ No rebuy, weekly bounty, PKO side-pot, mid-season ICM deal, or compounded rake. 
 ## Regression verification
 
 `npm test --prefix backend` covers monetary pure functions, migrations, tournament disclosure/join rules, admin permission checks, finance settings locks, cent exactness, refund/house disbursement limits, and core scoring. `npm test --prefix frontend`, `npm run build --prefix frontend` and both linters run in GitHub CI. See [API contract](API.md), [security](SECURITY.md), [architecture](ARCHITECTURE.md), and [operations](OPERATIONS.md).
+
+
+## v2.1 mid-season eligibility and shared distribution
+
+The active payout engine and all operator/creator rake rules remain unchanged. A new mid-season pool uses its **own** gross pot, participant count and standings; no funds may be moved from a previously locked pool. The exact number of future scheduled F1 rounds also informs Poker auto-steepness. Two-round or shorter pools are **free-only** (zero financial pot). Refer to [mid-season and cross-pool balancing](MIDSEASON_V2_1.md) for API fields, operator controls and scaled WDC/WCC scoring.

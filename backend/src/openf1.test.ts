@@ -39,3 +39,29 @@ test('queryOpenF1 rejects invalid upstream schema', async () => {
     globalThis.fetch = old
   }
 });
+
+/** Parallel pools share an exact cache key and one upstream fetch, also across later reads. */
+test('global OpenF1 cache deduplicates concurrent calendar requests', async () => {
+  const old = globalThis.fetch;
+  let outbound = 0;
+  globalThis.fetch = (async () => {
+    outbound++;
+    return {ok: true,json: async () => [{meeting_key: 123,session_key: 456}]};
+  }) as typeof fetch;
+  try {
+    const params = {year: 2099, meeting_key: Number(process.hrtime.bigint() % 1000000000n)};
+    const results = await Promise.all([queryOpenF1('meetings',params),queryOpenF1('meetings',params)]);
+    assert.equal(outbound,1);
+    assert.deepEqual(results[0],results[1]);
+    assert.deepEqual(await queryOpenF1('meetings',params),results[0]);
+    assert.equal(outbound,1,'persisted cache must also avoid later requests');
+  } finally {globalThis.fetch=old;}
+});
+
+/** Canonical cache keys do not depend on the insertion order of query parameters. */
+test('OpenF1 canonical key and TTL rules protect shared upstream quotas', async () => {
+  const {cacheKey, cacheLifetime} = await import('./openf1.ts');
+  assert.equal(cacheKey('session_result',{year:2031,session_key:42}),cacheKey('session_result',{session_key:42,year:2031}));
+  assert.ok(cacheLifetime('meetings') > cacheLifetime('session_result'));
+  assert.ok(cacheLifetime('drivers') > cacheLifetime('sessions'));
+});

@@ -167,3 +167,8 @@ Email is an **optional** provider-backed service. Delivery is disabled until con
 Notifications include: email-verification link, tournament creation/welcome, explicit username invitation, entry confirmation, pick-submission receipt, post-lock receipt/no-submission plus a link to revealed picks, published result with own points/current rank plus standings link, and post-championship final rank plus computed prize allocation. No other players' email addresses or secret invitation codes appear in routine notification bodies.
 
 Financial email amounts represent the ledger's **calculated allocation**, not proof that a payment has been made. No payment processor or payment initiation is integrated.
+
+
+## v2.1 mid-season API additions
+
+`POST /api/tournaments` optionally accepts launch scope `openingRound`, `expectedRaces`, `year`. `GET /api/catalogue` accepts `scope=all|full|mid`; public-only and active-only restrictions remain. `GET /api/calendar/remaining?year=` returns a cached future F1 session preview. `POST /api/admin/seasons` and `PATCH /api/admin/seasons/:id` now support optional `openingRound`, `expectedRaces`, `championshipEnabled`, `salvageEnabled`, and nullable August windows. `GET /api/season-scope?seasonId=...` reports the authoritative opening round, calendar count, scaled WDC/WCC bonus and salvage penalty. `POST /api/admin/openf1/import-calendar` accepts `upcomingOnly` and `startFromRound`. Operator-only `PATCH /api/operator/finance` additionally accepts `allowPublicMidseason`, `maxActiveOwnedPools`. See [full v2.1 contract](MIDSEASON_V2_1.md).

@@ -23,7 +23,7 @@ function setup(id: string, qualifyingAt: string) {
 }
 
 test('operator policy defaults disabled with remembered 500-bps rates', () => {
-  assert.deepEqual(platformPolicy(),{platformRakeEnabled:false,platformRakeBps:500,allowTournamentHouseRake:false});
+  assert.deepEqual(platformPolicy(),{platformRakeEnabled:false,platformRakeBps:500,allowTournamentHouseRake:false,allowPublicMidseason:true,maxActiveOwnedPools:3});
 });
 
 test('public tournament terms disclose an unconfigured season without leaking private settings', () => {

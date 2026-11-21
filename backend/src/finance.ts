@@ -51,7 +51,7 @@ export interface FinancePlan {
 
 /** Enforce integral cents and integer basis-point inputs before monetary arithmetic. */
 export function validateFinanceConfig(config: FinanceConfig): void {
-  if (!Number.isSafeInteger(config.baseEntryCents) || config.baseEntryCents <= 0) throw Error('Invalid base entry');
+  if (!Number.isSafeInteger(config.baseEntryCents) || config.baseEntryCents < 0) throw Error('Invalid base entry');
   if (![config.platformRakeBps, config.creatorRakeBps].every(v => Number.isInteger(v) && v >= 0 && v <= 1500)) throw Error('Invalid house rake');
   if (config.platformRakeBps + config.creatorRakeBps > 1500) throw Error('Combined house rake cannot exceed 15%');
   if (!['poker', 'adaptive-3tier'].includes(config.payoutModel)) throw Error('Invalid payout engine');
@@ -184,6 +184,14 @@ export function applyProration(rows: RankingRow[], members: PaymentEligibility[]
 /** Produce both house entitlements and the complete paid-place allocation from the gross contribution pot. */
 export function financePlan(rows: RankingRow[], members: PaymentEligibility[], grossCents: number, config: FinanceConfig): FinancePlan {
   validateFinanceConfig(config);
+  // Free/fun tournaments may run even when only one or two real F1 races remain.
+  // They cannot have any collected money, rake, or prize liability.
+  if (config.baseEntryCents === 0) {
+    if (grossCents !== 0) throw Error('Free tournaments cannot carry a money pot');
+    return {model: 'Free tournament · no payout',potCents:0,grossPotCents:0,platformRakeCents:0,
+      creatorRakeCents:0,netPlayerPotCents:0,slotsCents:[],prizes:[],participants:0,
+      effectiveUnits:0,paidPlaces:0,alpha:null,floorEnabled:null,payoutModel:config.payoutModel,undistributedCents:0};
+  }
   const rake = calculateRake(grossCents, config.platformRakeBps, config.creatorRakeBps);
   const effectiveUnits = Math.floor(grossCents / config.baseEntryCents);
   const participants = members.filter(m => m.contributionCents > 0).length;

@@ -1,7 +1,7 @@
 import {createHash, randomBytes, randomUUID} from 'node:crypto';
 import {all, get, run, transaction} from './db.ts';
 import {HttpError, bad, type User} from './auth.ts';
-import {tournamentTerms} from './financeStore.ts';
+import {platformPolicy, tournamentTerms} from './financeStore.ts';
 
 export type TournamentRole = 'operator' | 'commissioner' | 'player';
 export type Visibility = 'public' | 'invite_only';
@@ -44,6 +44,7 @@ export function newInviteCode(): string {
 
 /** Select only the safe, public-facing tournament fields and membership count. */
 const tournamentFields = `t.id,t.name,t.description,t.owner_id,t.visibility,t.status,t.created_at,
+  t.launch_opening_round,t.launch_expected_races,t.launch_year,
   (SELECT COUNT(*) FROM tournament_members tm WHERE tm.tournament_id=t.id) AS memberCount`;
 
 /** List tournaments visible to a user; an operator can administer all tournaments. */
@@ -57,12 +58,15 @@ export function listTournaments(user: User) {
 }
 
 /** Return a minimal, bounded, active public tournament catalogue without exposing private invitations. */
-export function publicCatalogue(query = '') {
+export function publicCatalogue(query = '', scope: 'all' | 'full' | 'mid' = 'all') {
+  if (!['all','full','mid'].includes(scope)) throw bad('Unknown catalogue scope');
   const search = String(query).trim().slice(0, 80).replace(/[\\%_]/g, '\\$&');
   return all(`SELECT ${tournamentFields} FROM tournaments t
     WHERE t.visibility='public' AND t.status='active'
+      AND (?='all' OR (?='mid' AND (t.launch_opening_round>1 OR EXISTS (SELECT 1 FROM seasons s WHERE s.tournament_id=t.id AND s.opening_round>1)))
+       OR (?='full' AND t.launch_opening_round=1 AND NOT EXISTS (SELECT 1 FROM seasons s WHERE s.tournament_id=t.id AND s.opening_round>1)))
       AND (t.name LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
-    ORDER BY t.created_at DESC LIMIT 100`, `%${search}%`, `%${search}%`).map(tournament => ({...tournament, terms: tournamentTerms(tournament.id)}));
+    ORDER BY t.created_at DESC LIMIT 100`, scope, scope, scope, `%${search}%`, `%${search}%`).map(tournament => ({...tournament, terms: tournamentTerms(tournament.id)}));
 }
 
 /** Require membership or global operator permission, hiding inaccessible private pools. */
@@ -93,13 +97,25 @@ function descriptionValue(value: unknown): string {
 }
 
 /** Create a tournament and atomically grant the creator its local commissioner role. */
-export function createTournament(user: User, name: unknown, description: unknown, visibility: unknown = 'invite_only') {
+export function createTournament(user: User, name: unknown, description: unknown, visibility: unknown = 'invite_only', launch: {openingRound?: unknown; expectedRaces?: unknown; year?: unknown} = {}) {
   const safeName = tournamentName(name), safeDescription = descriptionValue(description);
   const safeVisibility = tournamentVisibility(visibility);
+  const openingRound = launch.openingRound === undefined ? 1 : Number(launch.openingRound);
+  const expectedRaces = launch.expectedRaces === undefined ? 0 : Number(launch.expectedRaces);
+  const launchYear = launch.year === undefined ? null : Number(launch.year);
+  if (!Number.isInteger(openingRound) || openingRound < 1 || openingRound > 40 ||
+      !Number.isInteger(expectedRaces) || expectedRaces < 0 || expectedRaces > 40 ||
+      (launchYear !== null && (!Number.isInteger(launchYear) || launchYear < 2023 || launchYear > 2200))) throw bad('Invalid mid-season launch scope');
+  if (openingRound > 1 && safeVisibility === 'public' && !platformPolicy().allowPublicMidseason && !isOperator(user)) {
+    throw new HttpError(403, 'Public mid-season creation is disabled; invite-only pools are still permitted');
+  }
+  const cap = platformPolicy().maxActiveOwnedPools;
+  const owned = get("SELECT COUNT(*) AS n FROM tournaments WHERE owner_id=? AND status='active'", user.id)?.n ?? 0;
+  if (!isOperator(user) && owned >= cap) throw new HttpError(409, `Active tournament creation limit reached (${cap}); archive an unused tournament first`);
   const id = randomUUID(), inviteCode = newInviteCode(), now = new Date().toISOString();
   return transaction(() => {
-    run(`INSERT INTO tournaments(id,name,description,owner_id,invite_hash,created_at,visibility,status)
-      VALUES(?,?,?,?,?,?,?,'active')`, id, safeName, safeDescription, user.id, inviteHash(inviteCode), now, safeVisibility);
+    run(`INSERT INTO tournaments(id,name,description,owner_id,invite_hash,created_at,visibility,status,launch_opening_round,launch_expected_races,launch_year)
+      VALUES(?,?,?,?,?,?,?,'active',?,?,?)`, id, safeName, safeDescription, user.id, inviteHash(inviteCode), now, safeVisibility, openingRound, expectedRaces, launchYear);
     run('INSERT INTO tournament_members VALUES(?,?,?,?)', id, user.id, 'commissioner', now);
     return {...requireTournament(user, id), inviteCode};
   });
@@ -148,6 +164,10 @@ export function amendTournament(user: User, tournamentId: string, changes: Recor
   const visibility = changes.visibility === undefined ? current.visibility : tournamentVisibility(changes.visibility);
   const status = changes.status === undefined ? current.status : changes.status;
   if (!['active', 'archived'].includes(String(status))) throw bad('Invalid tournament status');
+  const mid = get("SELECT 1 FROM seasons WHERE tournament_id=? AND opening_round>1 LIMIT 1", tournamentId);
+  if (mid && current.visibility !== 'public' && visibility === 'public' && !platformPolicy().allowPublicMidseason && !isOperator(user)) {
+    throw new HttpError(403, 'Operator disabled new public mid-season tournaments; use invite-only visibility');
+  }
   run('UPDATE tournaments SET name=?,description=?,visibility=?,status=? WHERE id=?', name, description, visibility, status, tournamentId);
   return requireTournament(user, tournamentId);
 }
