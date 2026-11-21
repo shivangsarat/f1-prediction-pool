@@ -46,8 +46,17 @@ export function assertSameOrigin(req: IncomingMessage): void {
   } catch {
     throw new HttpError(403, 'Invalid Origin')
   }
-  if (allowed ? normalized !== new URL(allowed).origin : new URL(normalized).host !== String(req.headers.host ?? '')) {
-
+  const requestHost = String(req.headers.host ?? '');
+  const matchesPublicOrigin = allowed
+    ? normalized === new URL(allowed).origin
+    : new URL(normalized).host === requestHost;
+  // In development Vite serves the UI on :5173 and forwards /api to loopback :3001.
+  // Some proxy configurations rewrite Host to the API target. Only the known
+  // loopback UI origins are exempt, and NEVER outside explicit development mode.
+  const localViteOrigin = process.env.NODE_ENV === 'development' &&
+    (normalized === 'http://localhost:5173' || normalized === 'http://127.0.0.1:5173') &&
+    ['localhost:5173', '127.0.0.1:5173', 'localhost:3001', '127.0.0.1:3001'].includes(requestHost);
+  if (!matchesPublicOrigin && !localViteOrigin) {
     throw new HttpError(403, 'Cross-origin request blocked');
   }
   if (req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'Cross-site request blocked');

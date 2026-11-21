@@ -42,6 +42,34 @@ test('assertSameOrigin CSRF checks', () => {
   assert.doesNotThrow(() => assertSameOrigin({...req, headers: {authorization: 'Bearer test'}} as IncomingMessage));
 });
 
+/** Accept local Vite-proxied writes only in development, never cross-site or production. */
+test('assertSameOrigin handles the Vite development proxy without weakening production CSRF', () => {
+  const previousMode = process.env.NODE_ENV;
+  const previousPublicOrigin = process.env.PUBLIC_ORIGIN;
+  const request = (host: string, origin: string, fetchSite = 'same-origin') => ({
+    method: 'POST',
+    headers: {host, origin, cookie: 'f1pool_session=example', 'sec-fetch-site': fetchSite},
+  }) as IncomingMessage;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.PUBLIC_ORIGIN = 'https://gridlock.example.test';
+    assert.doesNotThrow(() => assertSameOrigin(request('127.0.0.1:3001', 'http://localhost:5173')));
+    assert.doesNotThrow(() => assertSameOrigin(request('localhost:3001', 'http://127.0.0.1:5173')));
+    assert.throws(() => assertSameOrigin(request('127.0.0.1:3001', 'https://untrusted.example.test')), {status: 403});
+    assert.throws(() => assertSameOrigin(request('127.0.0.1:3001', 'http://localhost:5174')), {status: 403});
+    assert.throws(() => assertSameOrigin(request('127.0.0.1:3001', 'http://localhost:5173', 'cross-site')), {status: 403});
+
+    process.env.NODE_ENV = 'production';
+    assert.throws(() => assertSameOrigin(request('127.0.0.1:3001', 'http://localhost:5173')), {status: 403});
+    assert.doesNotThrow(() => assertSameOrigin(request('backend:3001', 'https://gridlock.example.test')));
+  } finally {
+    if (previousMode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousMode;
+    if (previousPublicOrigin === undefined) delete process.env.PUBLIC_ORIGIN;
+    else process.env.PUBLIC_ORIGIN = previousPublicOrigin;
+  }
+});
+
 /** Response headers prevent caching and MIME sniffing; JSON is serialized explicitly. */
 test('securityHeaders and sendJson', () => {
 
