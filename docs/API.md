@@ -61,7 +61,8 @@ Unauthorized tournament/season/weekend lookups return **404**, not the existence
 | GET | `/api/weekends/:id/leaderboard` | Published weekly scores, scoped to member roster |
 | GET | `/api/weekends/:id/picks` | Own picks; other players only after their respective form lock |
 | PUT | `/api/weekends/:id/picks/{gp,sprint,unified}` | Append-only pre-lock revision; server UTC lock |
-| GET | `/api/roster?seasonId=S` | Driver / constructor IDs registered for season S |
+| GET | `/api/roster?seasonId=S` | Authorized tournament-member read; auto-populates an empty season from same-year OpenF1 sessions, caches imports and returns driver/constructor IDs |
+| POST | `/api/roster/sync` | Authorized tournament-member retry with `{seasonId}`; responds `{status,count,added,updated,sessionKey?,message?,drivers}`; throttled and source cache shared across pools |
 | GET | `/api/standings?seasonId=S` | Season standings, member-only |
 | GET | `/api/ledger?seasonId=S` | Cash, projected payouts, sanitized shared ledger |
 | GET | `/api/championship-picks?seasonId=S` | Pre-lock blind predictions |
@@ -172,3 +173,9 @@ Financial email amounts represent the ledger's **calculated allocation**, not pr
 ## v2.1 mid-season API additions
 
 `POST /api/tournaments` optionally accepts launch scope `openingRound`, `expectedRaces`, `year`. `GET /api/catalogue` accepts `scope=all|full|mid`; public-only and active-only restrictions remain. `GET /api/calendar/remaining?year=` returns a cached future F1 session preview. `POST /api/admin/seasons` and `PATCH /api/admin/seasons/:id` now support optional `openingRound`, `expectedRaces`, `championshipEnabled`, `salvageEnabled`, and nullable August windows. `GET /api/season-scope?seasonId=...` reports the authoritative opening round, calendar count, scaled WDC/WCC bonus and salvage penalty. `POST /api/admin/openf1/import-calendar` accepts `upcomingOnly` and `startFromRound`. Operator-only `PATCH /api/operator/finance` additionally accepts `allowPublicMidseason`, `maxActiveOwnedPools`. See [full v2.1 contract](MIDSEASON_V2_1.md).
+
+## Automatic OpenF1 driver and constructor rosters
+
+`GET /api/roster?seasonId=S` is the normal frontend loader and automatically imports the newest available OpenF1 session roster **from that F1 calendar year**, so commissioners do not enter drivers for each round. The API returns a flat roster array, preserving the existing frontend contract. If OpenF1 has not published session drivers for a future season, the result may be empty, and no historical/fake driver entries are substituted. The frontend offers `POST /api/roster/sync` as an authenticated retry, without granting commissioner privileges.
+
+Driver number is the season identity. New replacement driver numbers are appended, never deleting old IDs used by submissions. Once a real ballot has been submitted, previously configured driver name, acronym, constructor ID and constructor name remain unchanged; this prevents a later import from mutating old team references. An existing commissioner-maintained roster is authoritative until deliberately replaced. OpenF1 calls share the platform-wide SQLite cache; per-season success (6-hour) and failure (30-minute) attempt windows are persisted in `season_roster_sync`. Manual retries have a minimum one-minute spacing. See [roster sync operations](OPERATIONS.md).

@@ -177,3 +177,7 @@ The commissioner can configure a new tournament to start from a real F1 round af
 ## Current-year mid-season setup (post-August)
 
 For a **November 2026** tournament, open Commissioner → Season setup; choose **2026**, set opening round to the next upcoming F1 race, enter the remaining scheduled races, and turn **off both WDC/WCC picks and August salvage**. There is no retroactive summer-break adjustment. The backend deliberately rejects a backdated August salvage window, and 1–2 remaining rounds require a free (zero-entry-fee) pool. August datetime fields are now explicitly UTC and only appear when salvage is eligible. See [mid-season operations](docs/MIDSEASON_V2_1.md).
+
+## Driver rosters are loaded automatically
+
+The **My Predictions** page no longer requires a commissioner to enter ten drivers for each round. Opening a season fetches the latest available current-year driver lineup from [OpenF1](https://openf1.org/docs/), including constructor names, via the authenticated backend. Imported identities are cached and stored in SQLite; existing ballot driver IDs are never deleted or retroactively changed. If OpenF1 hasn't published that year's lineup yet, the page offers **Retry OpenF1 sync**, and automated checks will resume. The existing manual roster controls remain as a fallback only. See [API contract](docs/API.md) and [operations guide](docs/OPERATIONS.md).

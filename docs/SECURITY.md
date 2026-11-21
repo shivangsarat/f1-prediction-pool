@@ -59,3 +59,10 @@ Date: 21 November 2026. Scope: source-level review of the browser, API, SQLite, 
 ## v2.1 mid-season cross-pool controls
 
 The active-pool ownership cap, operator public-mid-season creation toggle, real F1 round boundary, upcoming-only imports and strictly tournament-scoped financial ledgers are enforced on the backend, not merely hidden in React. A lock checks the earliest persisted qualifying session each time; post-lock refunds **and negative adjustments** cannot drain a pool to fund another competition. A zero-entry mini-cup cannot accept financial ledger writes. Cached OpenF1 responses remain draft inputs subject to mandatory manual review, and encrypted transactional notifications are ordered to prioritize deadlines/results over invitations. See [v2.1 security and migration notes](MIDSEASON_V2_1.md).
+
+### Automatic roster import safeguards
+
+- Only authorized tournament members may trigger a season's `/api/roster` sync or the explicit retry endpoint. The retry is throttled per season, and upstream calls share a globally cached OpenF1 response.
+- Each source session is scoped to the calendar year of its season, and at least ten validated driver entries are required. Invalid IDs/names/teams are skipped instead of being blindly inserted.
+- Existing driver/team IDs are not deleted. Once ballots exist, previously imported identity/team mappings are never rewritten. Manual commissioner overrides take precedence and are still prohibited once submissions exist.
+- OpenF1 roster data is **not** FIA-certified; it must not automatically finalize classifications, race points or financial payouts. A future season without any published source lineup remains unavailable rather than inheriting another year's roster.

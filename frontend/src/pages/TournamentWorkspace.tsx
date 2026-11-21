@@ -30,13 +30,15 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
   const [seasons, setSeasons] = useState<any[]>([]), [activeId, setActiveId] = useState('');
   const [view, setView] = useState<View>('overview');
   const [weekends, setWeekends] = useState<any[]>([]), [roster, setRoster] = useState<any[]>([]);
+  const [rosterLoadedFor, setRosterLoadedFor] = useState('');
   const [standings, setStandings] = useState<any[]>([]), [members, setMembers] = useState<any[]>([]);
   const [ledger, setLedger] = useState<any>(null), [error, setError] = useState('');
   const [toastText, setToastText] = useState(''), [navOpen, setNavOpen] = useState(false);
   const [managedTournament, setManagedTournament] = useState(tournament);
   const commissioner = tournament.role === 'commissioner' || tournament.role === 'operator';
   const season = seasons.find(s => s.id === activeId);
-  const teams = useMemo(() => [...new Map(roster.map(d => [d.team_id, {id: d.team_id, name: d.team_name}])).values()], [roster]);
+  const activeRoster = rosterLoadedFor === activeId ? roster : [];
+  const teams = useMemo(() => [...new Map(activeRoster.map(d => [d.team_id, {id: d.team_id, name: d.team_name}])).values()], [activeRoster]);
 
   /** Present nonpersistent notifications about server operations. */
   function toast(message: string) {
@@ -73,6 +75,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
     if (!activeId) {
       setWeekends([]);
       setRoster([]);
+      setRosterLoadedFor('');
       setStandings([]);
       setLedger(null);
       return
@@ -87,6 +90,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
       ]);
       setWeekends(w);
       setRoster(r);
+      setRosterLoadedFor(activeId);
       setStandings(s);
       setLedger(l);
       setError('')
@@ -94,6 +98,17 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
     catch (e) {
       setError((e as Error).message)
     }
+  }, [activeId]);
+
+  /** Allow any enrolled player to retry the globally cached season roster import. */
+  const retryRoster = useCallback(async (): Promise<void> => {
+    if (!activeId) return;
+    const synced = await post<{status: string; count: number; added: number; drivers: any[]; message?: string}>(
+      '/roster/sync', {seasonId: activeId});
+    setRoster(synced.drivers);
+    setRosterLoadedFor(activeId);
+    toast(synced.count >= 10 ? `${synced.count} drivers ready for this season.` :
+      synced.message ?? 'Driver lineup is not available yet; retry after OpenF1 publishes it.');
   }, [activeId]);
 
   useEffect(() => {
@@ -135,10 +150,11 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
           {commissioner && <Action onClick={() => navigate('admin')}>Open commissioner setup</Action>}
         </div></Card> : <>
           {view === 'overview' && season && <Overview season={season} weekends={weekends} standings={standings} ledger={ledger} user={user} navigate={navigate} />}
-          {view === 'picks' && season && <PicksPage season={season} weekends={weekends} drivers={roster} teams={teams} user={user} toast={toast} />}
+          {view === 'picks' && season && <PicksPage season={season} weekends={weekends} drivers={activeRoster} teams={teams} user={user} toast={toast}
+            rosterLoaded={rosterLoadedFor === activeId} onRosterRetry={retryRoster} />}
           {view === 'standings' && season && <StandingsPage season={season} standings={standings} weekends={weekends} />}
           {view === 'ledger' && season && <LedgerPage season={season} ledger={ledger} standings={standings} />}
-          {view === 'championship' && season && <ChampionshipPage season={season} drivers={roster} teams={teams} user={user} toast={toast} />}
+          {view === 'championship' && season && <ChampionshipPage season={season} drivers={activeRoster} teams={teams} user={user} toast={toast} />}
           {view === 'rules' && season && <RulesPage season={season} />}
         </>}
         {view === 'admin' && commissioner && <>

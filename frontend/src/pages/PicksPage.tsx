@@ -1,10 +1,11 @@
 import {useCallback, useEffect, useState} from 'react';
-import {Info, RefreshCw, ShieldCheck, Trophy, Users} from 'lucide-react';
+import {RefreshCw, ShieldCheck, Trophy, Users} from 'lucide-react';
 import {get, put} from '../api';
 import {Card, SectionHeading, Pill, Select, Action, type Form} from '../shared/ui';
 import {PredictionEditor} from './PredictionEditor';
+import {RosterAvailability} from '../components/RosterAvailability';
 /** Manage blind race predictions and reveal published peer picks for one tournament. */
-export function PicksPage({season, weekends, drivers, teams, user, toast}: {season: any; weekends: any[]; drivers: any[]; teams: any[]; user: any; toast: (s: string) => void}) {
+export function PicksPage({season, weekends, drivers, teams, user, toast, rosterLoaded, onRosterRetry}: {season: any; weekends: any[]; drivers: any[]; teams: any[]; user: any; toast: (s: string) => void; rosterLoaded: boolean; onRosterRetry: () => Promise<void>}) {
 
   const [activeId, setActiveId] = useState(''), [data, setData] = useState<any>(null), [revealed, setRevealed] = useState<any[]>([]), [weekly, setWeekly] = useState<any[]>([]), [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -35,7 +36,7 @@ export function PicksPage({season, weekends, drivers, teams, user, toast}: {seas
   }, [refresh]);
   const selected = data?.mySubmissions?.find((s: any) => s.form === form);
   const cutoff = active ? (form === 'sprint' || form === 'unified' ? active.sprint_qualifying_at : active.qualifying_at) : '';
-  return <><SectionHeading eyebrow="PREDICT THE GRID" title="My Predictions" detail="Pick your finish order, bonus props, and Sprint calls. Latest revision counts until the server-side lock." right={<Select value={activeId} onChange={setActiveId} options={weekends.map(w => ({value: w.id, label: `R${w.round} · ${w.name}`}))} />} />{!active ? <Card><div className="empty">The commissioner needs to publish a race calendar before picks can open.</div></Card> : <div className="two-col picks-layout"><Card><div className="form-tab-header"><div><div className="eyebrow">ROUND {active.round} · {active.is_sprint ? 'SPRINT WEEKEND' : 'GRAND PRIX'}</div><h3>{active.name}</h3></div><Pill tone="amber">{active.is_sprint ? '96 pts max' : '85 pts max'}</Pill></div><div className="tabs">{forms.map(f => <button key={f} className={form === f ? 'active' : ''} onClick={() => setForm(f)}>{f === 'sprint' ? 'Form A · Sprint' : f === 'gp' && active.is_sprint ? 'Form B · GP' : f === 'unified' ? 'Unified ballot' : 'Grand Prix ballot'}</button>)}</div>{drivers.length < 10 ? <div className="empty"><Info size={24} /> The commissioner must register at least 10 drivers before entry opens.</div> : <PredictionEditor key={activeId + form + String(selected?.version ?? 0)} kind={form} existing={selected} drivers={drivers} teams={teams} deadline={cutoff} onSave={async (f, p) => {
+  return <><SectionHeading eyebrow="PREDICT THE GRID" title="My Predictions" detail="Pick your finish order, bonus props, and Sprint calls. Latest revision counts until the server-side lock." right={<Select value={activeId} onChange={setActiveId} options={weekends.map(w => ({value: w.id, label: `R${w.round} · ${w.name}`}))} />} />{!active ? <Card><div className="empty">The commissioner needs to publish a race calendar before picks can open.</div></Card> : <div className="two-col picks-layout"><Card><div className="form-tab-header"><div><div className="eyebrow">ROUND {active.round} · {active.is_sprint ? 'SPRINT WEEKEND' : 'GRAND PRIX'}</div><h3>{active.name}</h3></div><Pill tone="amber">{active.is_sprint ? '96 pts max' : '85 pts max'}</Pill></div><div className="tabs">{forms.map(f => <button key={f} className={form === f ? 'active' : ''} onClick={() => setForm(f)}>{f === 'sprint' ? 'Form A · Sprint' : f === 'gp' && active.is_sprint ? 'Form B · GP' : f === 'unified' ? 'Unified ballot' : 'Grand Prix ballot'}</button>)}</div>{drivers.length < 10 ? <RosterAvailability loaded={rosterLoaded} onRetry={onRosterRetry}/> : <PredictionEditor key={activeId + form + String(selected?.version ?? 0)} kind={form} existing={selected} drivers={drivers} teams={teams} deadline={cutoff} onSave={async (f, p) => {
     await put(`/weekends/${activeId}/picks/${f}`, p);
     toast('Prediction saved. Your revision is secured.');
     refresh()

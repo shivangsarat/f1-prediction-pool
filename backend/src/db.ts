@@ -259,6 +259,14 @@ export function migrateMidseason(): void {
   db.exec(`UPDATE email_outbox SET priority=10 WHERE event_key LIKE 'invited:%' OR event_key LIKE 'invite:%'`);
 }
 migrateMidseason();
+// Persist bounded auto-roster attempts so reconnecting clients cannot exhaust OpenF1.
+db.exec(`CREATE TABLE IF NOT EXISTS season_roster_sync (
+  season_id TEXT PRIMARY KEY REFERENCES seasons(id) ON DELETE CASCADE,
+  last_checked_at TEXT NOT NULL,
+  session_key INTEGER,
+  status TEXT NOT NULL CHECK(status IN ('ready','unavailable','manual')),
+  message TEXT
+);`);
 
 
 export type Row = Record<string, any>;

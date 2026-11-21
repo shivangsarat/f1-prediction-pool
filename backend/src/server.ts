@@ -9,6 +9,7 @@ import {queryOpenF1, calendarFromSessions, fetchDraft} from './openf1.ts';
 import {queueNotification, requestEmailVerification, confirmEmail, mailProvider, mailStatus, drainEmailOutbox, reconcileDeadlineEmails, publicUrl} from './email.ts';
 import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
 import {financePlan, grossFromEntries} from './finance.ts';
+import {ensureSeasonRoster, listSeasonRoster, markManualRoster} from './rosterSync.ts';
 import {platformPolicy, updatePlatformPolicy, seasonFinanceConfig, snapshotFinance, financeProjection, tournamentTerms, validateSeasonFinanceChanges} from './financeStore.ts';
 import {openingQualifying, midseasonPreview, scaledSeasonPoints, validateMidseasonConfiguration, validateSalvageWindow} from './midseason.ts';
 
@@ -513,7 +514,15 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const s = url.searchParams.get('seasonId');
     if (!s) throw bad('seasonId required');
     season(s, user);
-    return reply(res, 200, all('SELECT * FROM roster WHERE season_id=? ORDER BY team_name,name', s))
+    await ensureSeasonRoster(s);
+    return reply(res, 200, listSeasonRoster(s));
+  }
+  if (method === 'POST' && p === '/api/roster/sync') {
+    const b = await body(req);
+    const s = String(b.seasonId ?? '');
+    season(s, user); // Require tournament membership even for explicit retries.
+    const result = await ensureSeasonRoster(s, true);
+    return reply(res, 200, {...result, drivers: listSeasonRoster(s)});
   }
   if (method === 'GET' && p === '/api/standings') {
     const s = url.searchParams.get('seasonId');
@@ -687,6 +696,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       if (existing?.n > 0) throw new HttpError(409, 'Cannot replace roster after submissions');
       run('DELETE FROM roster WHERE season_id=?', b.seasonId);
       for (const d of b.drivers) run('INSERT INTO roster VALUES(?,?,?,?,?,?)', b.seasonId, d.id, d.name, d.code ?? d.id, d.teamId, d.teamName);
+      markManualRoster(b.seasonId);
       audit(user.id, 'roster.replace', b.seasonId, '', {count: b.drivers.length});
       return {count: b.drivers.length}
     }));
@@ -725,6 +735,7 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       if (get('SELECT COUNT(*) AS n FROM submissions p JOIN weekends w ON w.id=p.weekend_id WHERE w.season_id=?', s.id)?.n > 0) throw new HttpError(409, 'Cannot replace roster after predictions');
       run('DELETE FROM roster WHERE season_id=?', s.id);
       for (const d of rows) run('INSERT INTO roster VALUES(?,?,?,?,?,?)', s.id, d.id, d.name, d.code, d.teamId, d.teamName);
+      markManualRoster(s.id);
       audit(user.id, 'openf1.roster', s.id, '', {sessionKey, count: rows.length});
       return {count: rows.length, drivers: rows};
     }));
