@@ -6,7 +6,7 @@ import {get, post} from '../api';
 vi.mock('../api', () => ({post: vi.fn(), get: vi.fn(), patch: vi.fn()}));
 afterEach(cleanup);
 const mockPost = vi.mocked(post);
-const tournament = {id: 'a', name: 'Paddock Championship', description: 'Friends league', role: 'commissioner' as const, memberCount: 4};
+const tournament = {id: 'a', name: 'Paddock Championship', description: 'Friends league', role: 'commissioner' as const, memberCount: 4, visibility: 'invite_only' as const, status: 'active' as const};
 
 /** Validate that existing tournament cards navigate to the selected tournament. */
 describe('TournamentLobby', () => {

@@ -167,7 +167,7 @@ export function migrateDiscoverability(): void {
   if (!cols('email_outbox').has('claimed_until')) db.exec('ALTER TABLE email_outbox ADD COLUMN claimed_until TEXT');
   // Stable, unique usernames for existing users preserve historical user IDs and sessions.
   for (const u of db.prepare('SELECT id,display_name FROM users WHERE username IS NULL').all() as Array<{id:string,display_name:string}>) {
-    const base = u.display_name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').replace(/^[_\.\-]+|[_\.\-]+$/g, '').slice(0,18) || 'player';
+    const base = u.display_name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').replace(/^[_.-]+|[_.-]+$/g, '').slice(0,18) || 'player';
     const username = `${base}_${u.id.replace(/-/g, '').slice(0,8)}`;
     db.prepare('UPDATE users SET username=? WHERE id=?').run(username, u.id);
   }

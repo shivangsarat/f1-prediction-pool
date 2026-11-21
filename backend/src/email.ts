@@ -14,7 +14,11 @@ export function mailProvider(): MailProvider {
 
 /** Bound and encode HTML-free message strings to prevent header injection and mail abuse. */
 export function safeMailText(value: string, maxLength = 10000): string {
-  if (typeof value !== 'string' || value.length > maxLength || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) {
+  const hasControlCharacters = [...value].some(char => {
+    const code = char.charCodeAt(0);
+    return code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31);
+  });
+  if (typeof value !== 'string' || value.length > maxLength || hasControlCharacters) {
     throw bad('Invalid notification text');
   }
   return value;
@@ -136,7 +140,8 @@ export async function sendMail(to: string, subject: string, body: string): Promi
   const provider = mailProvider(), from = process.env.MAIL_FROM ?? '';
   if (provider === 'none') throw new Error('Email delivery is not configured');
   if (!validAddress(from) || !validAddress(to)) throw new Error('MAIL_FROM or recipient is invalid');
-  let url = '', headers: Record<string, string> = {'Content-Type': 'application/json'};
+  let url = '';
+  const headers: Record<string, string> = {'Content-Type': 'application/json'};
   let payload: unknown;
   if (provider === 'gmail') {
     url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';

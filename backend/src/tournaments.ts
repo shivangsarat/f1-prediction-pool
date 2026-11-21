@@ -10,11 +10,16 @@ export function isOperator(user: User): boolean {
   return user.role === 'admin';
 }
 
+/** Detect low ASCII control codes without relying on a control-character regular expression. */
+function hasLowAsciiControl(value: string, maxCode: number): boolean {
+  return [...value].some(char => char.charCodeAt(0) <= maxCode);
+}
+
 /** Normalize a tournament name and reject HTML/control characters. */
 export function tournamentName(value: unknown): string {
   if (typeof value !== 'string') throw bad('Tournament name is required');
   const name = value.trim();
-  if (name.length < 3 || name.length > 80 || /[<>\x00-\x1f]/.test(name)) {
+  if (name.length < 3 || name.length > 80 || (name.includes('<') || name.includes('>') || hasLowAsciiControl(name, 31))) {
     throw bad('Tournament name must contain 3–80 printable characters');
   }
   return name;
@@ -80,7 +85,7 @@ export function requireCommissioner(user: User, tournamentId: string) {
 /** Validate and truncate a plain-text tournament description. */
 function descriptionValue(value: unknown): string {
   const description = typeof value === 'string' ? value.trim() : '';
-  if (description.length > 500 || /[<>\x00-\x08]/.test(description)) {
+  if (description.length > 500 || (description.includes('<') || description.includes('>') || hasLowAsciiControl(description, 8))) {
     throw bad('Description must contain up to 500 plain-text characters');
   }
   return description;
