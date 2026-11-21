@@ -1,7 +1,7 @@
 {
   "name": "f1-prediction-pool",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Independent Gridlock frontend and backend services, deployed together or separately",
   "scripts": {
     "dev:backend": "npm run dev --prefix backend",

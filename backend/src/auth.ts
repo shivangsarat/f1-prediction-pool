@@ -45,7 +45,15 @@ export function tokenHash(token: string): string {
 }
 
 /** Internal authenticated-user representation; never includes password hashes. */
-export type User = {id: string; email: string; display_name: string; role: string};
+export type User = {id: string; email: string; display_name: string; username: string; role: string};
+
+/** Validate a stable, case-insensitive username for in-app discovery. */
+export function normalizeUsername(value: unknown): string {
+  const username = String(value ?? '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_.-]{2,29}$/.test(username)) throw bad('Username must start with a letter and contain 3–30 letters, digits, dots, hyphens or underscores');
+  return username;
+}
+
 
 /** Create an expiring, random session persisted in SQLite. */
 export function newSession(userId: string) {
@@ -73,7 +81,7 @@ export function recordFailedAttempt(key: string): void {
 }
 
 /** Register a normal user, or optionally bootstrap the single global operator. */
-export function register(email: string, name: string, password: string, bootstrapKey?: string) {
+export function register(email: string, name: string, password: string, bootstrapKey?: string, requestedUsername?: string) {
 
   email = typeof email === 'string' ? email.trim().toLowerCase() : '';
   name = typeof name === 'string' ? name.trim() : '';
@@ -87,17 +95,19 @@ export function register(email: string, name: string, password: string, bootstra
 
     throw forbidden('Operator registration requires a valid bootstrap key');
   }
-  const user: User = {id: randomUUID(), email, display_name: name, role: isAdmin ? 'admin' : 'participant'};
+  const userId = randomUUID();
+  const username = requestedUsername ? normalizeUsername(requestedUsername) : normalizeUsername('player_' + userId.replace(/-/g, '').slice(0,12));
+  const user: User = {id: userId, email, display_name: name, username, role: isAdmin ? 'admin' : 'participant'};
   try {
 
     return transaction(() => {
 
-      run('INSERT INTO users VALUES(?,?,?,?,?,?)', user.id, email, name, passwordHash(password), user.role, new Date().toISOString());
+      run('INSERT INTO users(id,email,display_name,password_hash,role,created_at,username) VALUES(?,?,?,?,?,?,?)', user.id, email, name, passwordHash(password), user.role, new Date().toISOString(), username);
       return {user, ...newSession(user.id)};
     });
   } catch (err) {
 
-    if (/UNIQUE/.test(String(err))) throw new HttpError(409, 'Email already registered');
+    if (/UNIQUE/.test(String(err))) throw new HttpError(409, 'Email or username already registered');
     throw err;
   }
 }
@@ -119,7 +129,7 @@ export function login(email: string, password: string, remoteAddress = 'unknown'
     throw new HttpError(401, 'Incorrect email or password');
   }
   run('DELETE FROM auth_attempts WHERE key_hash=?', tokenHash(key));
-  const user: User = {id: row.id, email: row.email, display_name: row.display_name, role: row.role};
+  const user: User = {id: row.id, email: row.email, display_name: row.display_name, username: row.username, role: row.role};
   return {user, ...newSession(user.id)};
 }
 
@@ -131,7 +141,7 @@ export function auth(req: IncomingMessage): User {
   const bearer = /^Bearer ([A-Za-z0-9_-]+)$/i.exec(req.headers.authorization ?? '')?.[1];
   const token = cookie ?? bearer;
   if (!token || !/^[A-Za-z0-9_-]{40,100}$/.test(token)) throw new HttpError(401, 'Authentication required');
-  const user = get(`SELECT u.id,u.email,u.display_name,u.role FROM users u JOIN sessions s ON s.user_id=u.id
+  const user = get(`SELECT u.id,u.email,u.display_name,u.username,u.role FROM users u JOIN sessions s ON s.user_id=u.id
     WHERE s.token_hash=? AND s.expires_at>?`, tokenHash(token), new Date().toISOString());
   if (!user) throw new HttpError(401, 'Session expired or invalid');
   return user as User;

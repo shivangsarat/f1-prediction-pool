@@ -36,7 +36,7 @@ test('legacy database migration retains seasons and members', () => {
 test('parallel tournaments may reuse a season year', () => {
 
   const season = get('SELECT * FROM seasons WHERE id=?', 'season-legacy');
-  run('INSERT INTO tournaments VALUES(?,?,?,?,?,?)', 'tournament-2', 'Second', '', 'admin1', 'another-hash', new Date().toISOString());
+  run('INSERT INTO tournaments(id,name,description,owner_id,invite_hash,created_at) VALUES(?,?,?,?,?,?)', 'tournament-2', 'Second', '', 'admin1', 'another-hash', new Date().toISOString());
   run('INSERT INTO seasons VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', 'season-2', 2026, '2026 Second', 'tournament-2', 'two-form', 'EUR', 1000, 5, 10, '2026-03-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-08T00:00:00Z', new Date().toISOString());
   assert.equal(all('SELECT * FROM seasons WHERE year=2026').length, 2);
   assert.notEqual(get('SELECT tournament_id FROM seasons WHERE id=?', 'season-2')?.tournament_id, season?.tournament_id);

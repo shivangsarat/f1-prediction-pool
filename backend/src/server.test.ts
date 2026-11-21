@@ -94,27 +94,28 @@ test('new accounts, season, pick locks, results, payout and audit workflow', asy
   assert.equal(r.data.cashCents, 1000);
   assert.equal(r.data.payouts.prizes.reduce((n: number, x: any) => n + x.amountCents, 0), 1000);
   assert.equal(r.data.entries[0].idempotency_key, undefined);
-  // Parallel tournament: even a global operator cannot inspect another tournament's pool.
+  // Platform operator can inspect and administer any tournament; ordinary players cannot.
   r = await call('/tournaments', 'POST', {name: 'Independent 2028 Pool', description: 'Second simultaneous league'}, player);
   assert.equal(r.status, 201);
   const otherTournamentId = r.data.id;
   r = await call('/seasons?tournamentId=' + otherTournamentId, 'GET', undefined, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 200);
   r = await call('/admin/seasons', 'POST', {tournamentId: otherTournamentId, year: 2028, name: 'Other 2028', sprintMode: 'one-form', baseEntryCents: 1000, currency: 'EUR', preseasonLock: '2028-03-01T12:00:00Z', salvageStart: '2028-08-01T00:00:00Z', salvageEnd: '2028-08-08T00:00:00Z'}, admin);
-  assert.equal(r.status, 404);
-  r = await call('/admin/seasons', 'POST', {tournamentId: otherTournamentId, year: 2028, name: 'Other 2028', sprintMode: 'one-form', baseEntryCents: 1000, currency: 'EUR', preseasonLock: '2028-03-01T12:00:00Z', salvageStart: '2028-08-01T00:00:00Z', salvageEnd: '2028-08-08T00:00:00Z'}, player);
   assert.equal(r.status, 201);
   const otherSeasonId = r.data.id;
   r = await call('/seasons/' + otherSeasonId, 'GET', undefined, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 200);
   r = await call('/standings?seasonId=' + otherSeasonId, 'GET', undefined, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 200);
   r = await call('/ledger?seasonId=' + otherSeasonId, 'GET', undefined, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 200);
   r = await call('/admin/ledger', 'POST', {seasonId: otherSeasonId, userId: playerId, type: 'buyin', amountCents: 1000, description: 'Wrong league charge', idempotencyKey: 'illegal-entry'}, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 201);
   r = await call('/admin/audit?tournamentId=' + otherTournamentId, 'GET', undefined, admin);
-  assert.equal(r.status, 404);
+  assert.equal(r.status, 200);
+  r = await call('/tournaments', 'GET', undefined, admin);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.length, 2);
   r = await call('/admin/backup', 'POST', {}, player);
   assert.equal(r.status, 403);
   r = await call('/seasons?tournamentId=' + tournamentId, 'GET', undefined, admin);

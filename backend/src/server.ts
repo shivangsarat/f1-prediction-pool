@@ -4,8 +4,9 @@ import {get, all, run, transaction, dbPath, db} from './db.ts';
 import {createBackup} from './backups.ts';
 import {HttpError, bad, register, login, logout, auth, setSessionCookie, clearSessionCookie, type User} from './auth.ts';
 import {readJson, assertSameOrigin, securityHeaders, sendJson, writeAudit, clientIp} from './http.ts';
-import {listTournaments, requireTournament, requireCommissioner, requireSeasonMember, requireSeasonCommissioner, createTournament, joinTournament, rotateInvite} from './tournaments.ts';
+import {listTournaments, publicCatalogue, invitePreview, requireTournament, requireCommissioner, requireSeasonMember, requireSeasonCommissioner, createTournament, joinTournament, joinPublicTournament, rotateInvite, amendTournament, searchUsers, inviteExistingUser, myInvitations, respondInvitation} from './tournaments.ts';
 import {queryOpenF1, calendarFromSessions, fetchDraft} from './openf1.ts';
+import {queueNotification, requestEmailVerification, confirmEmail, mailProvider, mailStatus, drainEmailOutbox, reconcileDeadlineEmails, publicUrl} from './email.ts';
 import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, payoutPlan, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
 
 // A production instance must be able to make encrypted backups before accepting payments or picks.
@@ -275,6 +276,24 @@ function ensureResultPublishable(w: any, r: any) {
   if (!r.final_classification && !(w.chequered_at && locked(new Date(Date.parse(w.chequered_at) + 86400000).toISOString()))) throw new HttpError(409, 'Publication requires FIA final classification or 24h after the chequered flag');
 }
 
+/** Isolate notification failures from authoritative tournament, scoring and ledger transactions. */
+function notifySafely(userId: string, eventKey: string, tournamentId: string | null, subject: string, message: string): void {
+  try {queueNotification(userId, eventKey, tournamentId, subject, message);}
+  catch (error) {console.error('[NOTIFICATION QUEUE]', (error as Error).message);}
+}
+
+/** Email a new participant and current commissioners without exposing other participants' addresses. */
+function notifyJoined(user: User, tournament: any): void {
+  notifySafely(user.id, `joined:${tournament.id}:${user.id}`, tournament.id,
+    `You joined ${tournament.name}`, `Your tournament is ready:\n${publicUrl()}/?tournament=${tournament.id}`);
+  const commissioners = all("SELECT user_id FROM tournament_members WHERE tournament_id=? AND role='commissioner'", tournament.id);
+  for (const commissioner of commissioners) {
+    if (commissioner.user_id === user.id) continue;
+    notifySafely(commissioner.user_id, `member-joined:${tournament.id}:${user.id}:${commissioner.user_id}`, tournament.id,
+      `New entrant in ${tournament.name}`, `${user.display_name} (@${user.username}) joined your tournament.\n${publicUrl()}/?tournament=${tournament.id}`);
+  }
+}
+
 /**
  * Authorize and dispatch requests for the correct participant/tournament resource.
  * @param req - Input to this operation.
@@ -285,13 +304,24 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
 
   const method = req.method ?? 'GET', p = url.pathname, parts = p.split('/').filter(Boolean);
   if (method === 'GET' && p === '/api/health') return reply(res, 200, {status: 'ok', serverTime: now(), database: 'sqlite-wal'});
+  if (method === 'GET' && p === '/api/auth/verify-email') {
+    const code = url.searchParams.get('token') ?? '';
+    const verified = confirmEmail(code);
+    return reply(res, verified ? 200 : 400, {verified});
+  }
+  if (method === 'GET' && p === '/api/email/capabilities') return reply(res, 200, {available: mailProvider() !== 'none'});
+  if (method === 'GET' && p === '/api/catalogue') return reply(res, 200, publicCatalogue(url.searchParams.get('q') ?? ''));
+  if (method === 'GET' && parts[1] === 'invite-preview' && parts.length === 3) return reply(res, 200, invitePreview(parts[2]));
   if (method === 'POST' && p === '/api/auth/register') {
     const key = `register:${clientIp(req)}`;
     const {rateLimit, recordFailedAttempt} = await import('./auth.ts');
     rateLimit(key, 20, 60);
     recordFailedAttempt(key);
-    const b = await body(req), result = register(b.email as string, b.name as string, b.password as string, b.bootstrapKey as string);
+    const b = await body(req), result = register(b.email as string, b.name as string, b.password as string, b.bootstrapKey as string, b.username as string);
     setSessionCookie(res, result.token);
+    if (mailProvider() !== 'none') {
+      try {requestEmailVerification(result.user);} catch (error) {console.error('[VERIFICATION QUEUE]', (error as Error).message);}
+    }
     return reply(res, 201, {user: result.user, expiresAt: result.expiresAt})
   }
   if (method === 'POST' && p === '/api/auth/login') {
@@ -300,25 +330,68 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     return reply(res, 200, {user: result.user, expiresAt: result.expiresAt})
   }
   const user = auth(req);
-  if (method === 'GET' && p === '/api/auth/me') return reply(res, 200, user);
+  if (method === 'GET' && p === '/api/auth/me') return reply(res, 200, {...user, emailVerified: !!get('SELECT email_verified_at FROM users WHERE id=?', user.id)?.email_verified_at, notificationOptIn: !!get('SELECT notification_opt_in FROM users WHERE id=?', user.id)?.notification_opt_in});
+  if (method === 'POST' && p === '/api/account/verification-email') {
+    requestEmailVerification(user);
+    return reply(res, 202, {queued: mailProvider() !== 'none'});
+  }
+  if (method === 'PATCH' && p === '/api/account/notifications') {
+    const b = await body(req);
+    if (typeof b.enabled !== 'boolean') throw bad('enabled must be boolean');
+    run('UPDATE users SET notification_opt_in=? WHERE id=?', b.enabled ? 1 : 0, user.id);
+    return reply(res, 200, {enabled: b.enabled});
+  }
   if (method === 'POST' && p === '/api/auth/logout') {
     logout(req);
     clearSessionCookie(res);
     return reply(res, 200, {ok: true})
   }
   if (method === 'GET' && p === '/api/tournaments') return reply(res, 200, listTournaments(user));
+  if (method === 'GET' && p === '/api/invitations') return reply(res, 200, myInvitations(user));
+  if (method === 'POST' && parts[1] === 'invitations' && parts.length === 4 && parts[3] === 'respond') {
+    const b = await body(req);
+    const result = respondInvitation(user, parts[2], b.action);
+    if (b.action === 'accept') notifyJoined(user, result);
+    return reply(res, 200, result);
+  }
+  if (method === 'POST' && p === '/api/tournaments/join-public') {
+    const b = await body(req);
+    const joined = joinPublicTournament(user, b.tournamentId);
+    notifyJoined(user, joined);
+    return reply(res, 200, joined);
+  }
   if (method === 'POST' && p === '/api/tournaments') {
     const b = await body(req);
-    return reply(res, 201, createTournament(user, b.name, b.description))
+    const created = createTournament(user, b.name, b.description, b.visibility ?? 'invite_only');
+    notifySafely(user.id, `created:${created.id}:${user.id}`, created.id, `Tournament created: ${created.name}`, `Your new GRIDLOCK tournament is ready.\n${publicUrl()}/?tournament=${created.id}`);
+    return reply(res, 201, created)
   }
   if (method === 'POST' && p === '/api/tournaments/join') {
     const b = await body(req);
-    return reply(res, 200, joinTournament(user, b.inviteCode))
+    const joined = joinTournament(user, b.inviteCode);
+    notifyJoined(user, joined);
+    return reply(res, 200, joined)
   }
   if (parts[1] === 'tournaments' && parts.length >= 3) {
 
     const t = requireTournament(user, parts[2]);
     if (method === 'GET' && parts.length === 3) return reply(res, 200, t);
+    if (method === 'PATCH' && parts.length === 3) {
+      const changes = await body(req);
+      const amended = amendTournament(user, t.id, changes);
+      audit(user.id, 'tournament.amend', t.id, '', changes);
+      return reply(res, 200, amended);
+    }
+    if (method === 'GET' && parts[3] === 'users' && parts.length === 4) {
+      return reply(res, 200, searchUsers(user, t.id, url.searchParams.get('q') ?? ''));
+    }
+    if (method === 'POST' && parts[3] === 'invite-user' && parts.length === 4) {
+      const b = await body(req);
+      const result = inviteExistingUser(user, t.id, b.userId);
+      notifySafely(b.userId, `invited:${t.id}:${b.userId}`, t.id, `Invitation to ${t.name}`, `You have a new GRIDLOCK tournament invitation. Sign in to accept it:\n${publicUrl()}/?tournament=${t.id}`);
+      audit(user.id, 'tournament.invite-user', t.id, '', {userId: b.userId});
+      return reply(res, 201, result);
+    }
     if (method === 'GET' && parts[3] === 'members') {
 
       return reply(res, 200, all(`SELECT u.id,u.display_name,m.role,m.joined_at FROM users u
@@ -374,7 +447,10 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       const b = await body(req);
       return reply(res, 201, transaction(() => {
         if (locked(formLock(w, form))) throw new HttpError(409, 'Submission deadline passed');
-        return insertSubmission(w, user.id, form, b, now())
+        const receipt = insertSubmission(w, user.id, form, b, now());
+        notifySafely(user.id, `submission:${w.id}:${form}:${user.id}:${receipt.version}`, w.tournament_id,
+          `${w.name}: your ${form} submission is saved`, `Your prediction was submitted at ${receipt.submittedAt} (UTC). Revision ${receipt.version}.\nYour picks stay private until the session locks.\n${publicUrl()}/?tournament=${w.tournament_id}`);
+        return receipt
       }));
     }
   }
@@ -623,6 +699,13 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
         for (const s of scores) run('INSERT INTO score_snapshots VALUES(?,?,?,?,?,?,?,?,?,?)', id(), w.id, s.userId, r.version, s.total, s.exactPodiums, s.exactTop10, s.propPoints, toJSON(s), now());
         run('UPDATE results SET published_at=?,published_hash=? WHERE weekend_id=?', now(), digest, w.id);
         audit(user.id, 'result.publish', w.id, '', {version: r.version, digest});
+        const ranks = rankWithTies(standingRows(w.season_id));
+        for (const row of ranks) {
+          const weekScore = scores.find(item => item.userId === row.userId)?.total ?? 0;
+          notifySafely(row.userId, `result:${w.id}:${r.version}:${row.userId}`, w.tournament_id,
+            `${w.name}: results and standings published`,
+            `Your ${w.name} result: ${weekScore} points.\nOverall rank: ${row.rank}; total points: ${row.total}.\nReview the public submissions, full results and standings in the tournament:\n${publicUrl()}/?tournament=${w.tournament_id}`);
+        }
         return {published: true, count: scores.length, digest}
       });
       try {
@@ -688,6 +771,15 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
       if (get('SELECT 1 FROM champions WHERE season_id=?', s.id)) throw new HttpError(409, 'Championship has already been published');
       run('INSERT INTO champions VALUES(?,?,?,?,?)', s.id, b.wdc, b.wcc, now(), user.id);
       audit(user.id, 'championship.publish', s.id, '', {wdc: b.wdc, wcc: b.wcc});
+      const ranks = rankWithTies(standingRows(s.id));
+      const payouts = payoutSnapshot(s);
+      const tournament = get('SELECT name FROM tournaments WHERE id=?', s.tournament_id);
+      for (const row of ranks) {
+        const share = payouts.prizes.find((p: any) => p.userId === row.userId)?.amountCents ?? 0;
+        notifySafely(row.userId, `champions:${s.id}:${row.userId}`, s.tournament_id,
+          `${tournament?.name ?? 'GRIDLOCK'}: final standings and prize shares`,
+          `Final position: #${row.rank} with ${row.total} points.\nYour calculated prize allocation: ${(share / 100).toFixed(2)} ${s.currency}.\nThis is a ledger allocation, not proof of payment.\nFull final standings and payout information:\n${publicUrl()}/?tournament=${s.tournament_id}`);
+      }
       return {published: true};
     }));
   }
@@ -697,6 +789,16 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     requireCommissioner(user, t);
     const entityId = url.searchParams.get('entityId');
     return reply(res, 200, entityId ? all('SELECT * FROM audit WHERE tournament_id=? AND entity_id=? ORDER BY created_at DESC LIMIT 300', t, entityId) : all('SELECT * FROM audit WHERE tournament_id=? ORDER BY created_at DESC LIMIT 300', t))
+  }
+  if (method === 'GET' && p === '/api/admin/mail') {
+    if (user.role !== 'admin') throw new HttpError(403, 'Operator privileges required');
+    return reply(res, 200, mailStatus());
+  }
+  if (method === 'POST' && p === '/api/admin/mail/sync') {
+    if (user.role !== 'admin') throw new HttpError(403, 'Operator privileges required');
+    const queued = reconcileDeadlineEmails();
+    const delivery = await drainEmailOutbox(10);
+    return reply(res, 200, {queued, delivery});
   }
   if (method === 'POST' && p === '/api/admin/backup') {
     if (user.role !== 'admin') throw new HttpError(403, 'Operator role required for database-wide backups');
@@ -730,7 +832,9 @@ if (process.env.NODE_ENV !== 'test') {
   const port = Number(process.env.API_PORT ?? 3001), host = process.env.HOST ?? '0.0.0.0';
   app.listen(port, host, () => {
     console.log(`F1 Prediction Pool listening http://${host}:${port} SQLite: ${dbPath}`);
-    void catchUpOpenF1()
+    void catchUpOpenF1();
+    void dispatchPendingMail();
+    setInterval(() => void dispatchPendingMail(), 60_000).unref()
   });
   /**
  * Gracefully terminate the API and create a consistent database backup.
@@ -753,6 +857,16 @@ if (process.env.NODE_ENV !== 'test') {
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
 }
+/** Process delayed notifications after downtime; this does not control prediction deadlines. */
+async function dispatchPendingMail(): Promise<void> {
+  try {
+    reconcileDeadlineEmails();
+    await drainEmailOutbox(10);
+  } catch (error) {
+    console.error('[MAIL DISPATCH]', (error as Error).message);
+  }
+}
+
 /** On restart, stage missing official classifications for review, never publish automatically. */
 async function catchUpOpenF1() {
 

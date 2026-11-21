@@ -6,7 +6,7 @@ Date: 21 November 2026. Scope: source-level review of the browser, API, SQLite, 
 
 | Risk | Severity before changes | Implemented control | Verification |
 | --- | --- | --- | --- |
-| Shared global seasons/roles expose other pools | Critical | Tournament membership tables and scoped authorization on every season, weekend, pick, leaderboard, ledger and commissioner route. Global operator cannot access unjoined tournaments. | `tournaments.test.ts`, cross-tournament HTTP assertions in `server.test.ts` |
+| Shared global seasons/roles expose other pools | Critical | Tournament membership tables and scoped authorization on every season, weekend, pick, leaderboard, ledger and commissioner route. Only a global operator explicitly bypasses tournament membership, with full audit trails for settings changes; commissioners remain confined to their own tournaments. | `tournaments.test.ts`, cross-tournament HTTP assertions in `server.test.ts` |
 | Browser session exposed through `sessionStorage` | High | 256-bit random server-side sessions with SHA-256 token digest in DB. Browser receives HttpOnly/SameSite Strict cookie, Secure under NODE_ENV=production. Registration/login JSON do not reveal the token. | `auth.test.ts`, `http.test.ts` |
 | CSRF with cookie-based sessions | High | JSON content-type requirement, strict request-Origin enforcement for browser writes, `Sec-Fetch-Site` screening and no wildcard CORS. CLI Bearer requests are the only originless write exception. | `http.test.ts`, API integration |
 | Unbounded password guessing | High | Persisted IP/account-keyed login failure counters with 429 lockout, memory-hard salted `scryptSync` hash, 12-character password minimum and session invalidation on logout. | `auth.test.ts` |
@@ -15,6 +15,9 @@ Date: 21 November 2026. Scope: source-level review of the browser, API, SQLite, 
 | Unencrypted sensitive DB snapshots | High | Production backup generation refuses missing/invalid AES-256-GCM key; online SQLite snapshots include WAL writes and are restored by an authenticated decryptor. | `backups.test.ts` (AES-GCM decrypt/restore check) and restore runbook |
 | Unreviewed external classification changes scoring | High | OpenF1 results are provisional drafts, manual verification required, result preview digest required before publish, published snapshots immutable. | `openf1.test.ts`, `server.test.ts` |
 | Lack of secure browser response headers | Medium | Restrictive SPA CSP with no third-party fonts, frame-ancestor restrictions, nosniff and no-referrer. API sends restrictive frame and permission policy. | `http.test.ts`; inspect nginx configuration |
+| Unverified sender/address impersonation | High | Transactional notifications require verified email ownership and opt-in; user directory never exposes email; pending invitations require acceptance. One-time verification tokens are hashed and email payloads encrypted at rest. | `email.test.ts`, `discovery.test.ts` |
+| Mail provider outages / duplicate notices | Medium | Persistent encrypted outbox, event-key deduplication, bounded retries and on-startup lock reconciliation; scoring never depends on email. | `email.test.ts`; provider-specific acceptance in staging |
+| Public catalogue reveals private pools | High | Active public-only filter; invite-only pools omitted; private invitation previews require secret codes. | `discovery.test.ts` |
 | Browser-only lock enforcement | Critical | All write operations compare persisted UTC lock on the server inside database transaction. | `rules.test.ts`, `server.test.ts` |
 
 ## Residual risks and deployment requirements
@@ -29,13 +32,17 @@ Date: 21 November 2026. Scope: source-level review of the browser, API, SQLite, 
 8. **Dependencies and CI:** Run `npm audit`, dependency updates, `npm run lint`, frontend Vitest tests and production build on every release. The frontend dependency install and build were not available in the isolated development environment; CI must be checked before deployment.
 9. **Privacy/data retention:** Ledger descriptions are intentionally visible to tournament participants. Avoid recording personal financial details in transaction descriptions; set a policy for retention, account deletion and offsite copies.
 10. **Operational secrets:** Never commit `.env`, encryption keys or raw database snapshots; use least privilege, file permissions and secrets management. Make sure the global operator email/bootstrap secret is changed from examples.
-11. **Password recovery/MFA:** Password reset, email verification, MFA, account lockout notifications, refresh/session management and administrative user removal are not implemented yet. A security-conscious public deployment should implement these before wider use.
+11. **Password recovery/MFA:** Email verification is implemented with one-time encrypted queued links, but password recovery, MFA, account lockout notifications, administrative user removal and self-service deletion are not implemented. Require MFA before publicly hosting a financially sensitive administrator account.
 
 ## Recommended future controls
 
-- Email verification and secure account recovery with expiring hashed reset tokens.
+- Secure password recovery using expiring hashed reset tokens and verified inboxes; phishing-resistant MFA for commissioner/operator accounts.
 - Optional MFA for tournament commissioners and platform operators.
 - Centralized event/log monitoring, anomaly alerts for login and ledger edits, and automated dependency scanning.
 - Independent security review, authenticated UI acceptance tests and controlled load testing before public launch.
+
+12. **Public catalogue and spam:** Enforce edge/WAF request limits and audit tournament creation/invitations. Usernames are discoverable by commissioners in limited prefix queries; do not include email in responses. Keep invitation links confidential and rotate when exposed.
+13. **Email sending and compliance:** The backend is not an unrestricted bulk-mail sender. Provider quotas apply; verify DMARC/SPF for authorized sending domains, secure OAuth refresh tokens/API keys, monitor failed jobs, and obtain appropriate user consent and data-retention policies. Registration email ownership is only established after confirmation.
+14. **Global operator privileges:** The operator can administer all tournaments and their ledgers and is a high-value target. Restrict `ADMIN_EMAIL`, guard bootstrap credentials, monitor audit events, and independently reconcile any ledger adjustment. Immutable results and no-overdraft policies remain in force.
 
 **Conclusion:** The core multi-tenant isolation and the highest-risk browser/session and ledger access issues identified in the initial code have been addressed and covered by tests. The platform is still a prototype, not a certified or independently audited financial system.

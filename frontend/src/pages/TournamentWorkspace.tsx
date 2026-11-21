@@ -10,6 +10,7 @@ import {LedgerPage} from './LedgerPage';
 import {RulesPage} from './RulesPage';
 import {AdminPage} from './AdminPage';
 import type {Tournament} from './TournamentLobby';
+import {TournamentManagement} from '../components/TournamentManagement';
 
 const NAV = [
   {key: 'overview', label: 'Race HQ', icon: Activity},
@@ -32,7 +33,8 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
   const [standings, setStandings] = useState<any[]>([]), [members, setMembers] = useState<any[]>([]);
   const [ledger, setLedger] = useState<any>(null), [error, setError] = useState('');
   const [toastText, setToastText] = useState(''), [navOpen, setNavOpen] = useState(false);
-  const commissioner = tournament.role === 'commissioner';
+  const [managedTournament, setManagedTournament] = useState(tournament);
+  const commissioner = tournament.role === 'commissioner' || tournament.role === 'operator';
   const season = seasons.find(s => s.id === activeId);
   const teams = useMemo(() => [...new Map(roster.map(d => [d.team_id, {id: d.team_id, name: d.team_name}])).values()], [roster]);
 
@@ -140,20 +142,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
           {view === 'rules' && season && <RulesPage season={season} />}
         </>}
         {view === 'admin' && commissioner && <>
-          <Card><h3>Invite tournament participants</h3><p className="muted">Rotate the private invite code to issue a new one. The previous code stops working.</p>
-            <Action kind="outline" onClick={async () => {
-
-              try {
-
-                const data = await post<{inviteCode: string}>(`/tournaments/${tournament.id}/rotate-invite`, {});
-                await navigator.clipboard.writeText(data.inviteCode);
-                toast('New invitation copied to clipboard. Save it before leaving.');
-              }
-              catch (e) {
-                toast((e as Error).message)
-              }
-            }}>Generate new invite & copy</Action>
-          </Card>
+          <TournamentManagement tournament={managedTournament} onChanged={setManagedTournament}/>
           <AdminPage season={season} seasons={seasons} weekends={weekends} users={members.map(m => ({userId: m.id, name: m.display_name}))}
             refresh={() => {
               void refresh();
@@ -161,7 +150,7 @@ export function TournamentWorkspace({tournament, user, onExit, onSignOut}: {
               void reloadMembers()
             }} toast={toast} tournamentId={tournament.id} isOperator={user.role === 'admin'} />
         </>}
-        <footer className="footer"><div><FlagTriangleRight size={16} /> GRIDLOCK <span>{tournament.name}</span></div><span>Unofficial fan project. Not affiliated with Formula 1 or FIA.</span></footer>
+        <footer className="footer"><div><FlagTriangleRight size={16} /> GRIDLOCK <span>{managedTournament.name}</span></div><span>Unofficial fan project. Not affiliated with Formula 1 or FIA.</span></footer>
       </div>
     </main>
     {toastText && <div className="toast" role="status"><Info size={18} />{toastText}<button onClick={() => setToastText('')} aria-label="Dismiss"><X size={15} /></button></div>}

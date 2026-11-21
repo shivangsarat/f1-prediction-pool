@@ -97,3 +97,48 @@ A fully cancelled race or a classified race with fewer than two green-flag laps 
 ## Security notes
 
 Operator routes provide **no global visibility into tournament predictions or member ledgers**. `POST /api/admin/backup` is a deliberately separate whole-database maintenance capability. Session values remain inaccessible to browser JavaScript. See [source audit](SECURITY.md).
+
+## Global operator, tournament catalogue and invitations (v0.3)
+
+Authorization levels:
+
+- **Global operator (`users.role='admin'`)**: sees every tournament in `GET /api/tournaments`, can enter any workspace and use all tournament commissioner endpoints, edit tournament visibility/status, inspect ledgers/audits, and execute database-wide backups. Existing ledger transactions and published results remain immutable; corrections must be auditable and obey financial/lock invariants.
+- **Tournament commissioner (`tournament_members.role='commissioner'`)**: manages only pools they own/commission, including members, settings, season, payouts ledger, results, and invite tools.
+- **Participant (`tournament_members.role='player'`)**: can view only member tournaments, submit their own eligible picks, and read that tournament's revealed picks, standings, and ledger projections. Cannot mutate management resources.
+- **Guest**: only `GET /api/catalogue`, `GET /api/invite-preview/{token}`, mail availability, health, registration and login. No private pool information.
+
+| Method | API path | Permission | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/catalogue?q=monaco` | Public | Active, public tournament metadata only (100 max); no private pools or invite secrets |
+| GET | `/api/invite-preview/{token}` | Public | Validate an active secret invitation and return limited display metadata |
+| GET | `/api/tournaments` | Signed in | My tournaments; **all** tournaments for global operator |
+| POST | `/api/tournaments` | Signed in | `{name,description,visibility:'public'\|'invite_only'}`; creator becomes commissioner |
+| PATCH | `/api/tournaments/{id}` | Commissioner/operator | Modify name, description, visibility and `status:'active'\|'archived'` |
+| POST | `/api/tournaments/join-public` | Signed in | `{tournamentId}`; only active public pools |
+| POST | `/api/tournaments/join` | Signed in | `{inviteCode}`; only active pools with a valid rotating secret |
+| POST | `/api/tournaments/{id}/rotate-invite` | Commissioner/operator | Revoke old link and return a one-time 192-bit invitation token |
+| GET | `/api/tournaments/{id}/users?q=username` | Commissioner/operator | Search up to 10 nonmembers by username, without emails |
+| POST | `/api/tournaments/{id}/invite-user` | Commissioner/operator | `{userId}`; create a pending invitation rather than silently enrolling |
+| GET | `/api/invitations` | Signed in | Pending invitations addressed only to caller |
+| POST | `/api/invitations/{id}/respond` | Signed in recipient | `{action:'accept'\|'decline'}`; acceptance creates the membership |
+| GET | `/api/auth/verify-email?token=...` | Public one-time token | Verify own inbox, invalidate all prior proof links |
+| GET | `/api/email/capabilities` | Public | `{available:boolean}`, no credentials |
+| POST | `/api/account/verification-email` | Signed in | Request a confirmation message (max 3/day) |
+| PATCH | `/api/account/notifications` | Signed in | `{enabled:boolean}`; opt out of event mail |
+| GET | `/api/admin/mail` | Operator only | Provider and aggregate queued/delivered counts |
+| POST | `/api/admin/mail/sync` | Operator only | Reconcile missed session-lock notifications, try up to 10 deliveries |
+
+### Invitation deep links and redirect behavior
+
+- Private sharing URL: `https://gridlock.example/?invite=<secret>`. A signed-in user joins and opens the tournament immediately. A guest sees **registration first** and an obvious **sign-in alternative** for existing users. After successful authentication the pending link is validated server-side, joined and opened. Unknown accounts cannot be distinguished from existing ones solely from a link (account-enumeration prevention).
+- Public catalogue joining: guests are redirected to sign-up with `?public=<tournamentId>` preserved; after authentication the server confirms visibility is still public/active before joining and opening that tournament.
+- Official email links to existing members use `/?tournament=<id>` (not secret tokens). Membership is still authorized for each API call.
+- Secret codes are SHA-256 hashed in the database, never returned on reads. Rotating a code invalidates all earlier URLs. Archived pools cannot accept new entrants via either mechanism.
+
+### Notification behavior
+
+Email is an **optional** provider-backed service. Delivery is disabled until configured; the game continues to operate normally. An account must verify its inbox and opt in before ordinary event email is queued. The encrypted SQLite outbox deduplicates by event, claims each job for one worker, retries failures with exponential backoff, and catches up session-lock events after downtime (14-day window). This is **not exactly-once delivery**: an outage between provider acceptance and recording success may cause duplicate emails.
+
+Notifications include: email-verification link, tournament creation/welcome, explicit username invitation, entry confirmation, pick-submission receipt, post-lock receipt/no-submission plus a link to revealed picks, published result with own points/current rank plus standings link, and post-championship final rank plus computed prize allocation. No other players' email addresses or secret invitation codes appear in routine notification bodies.
+
+Financial email amounts represent the ledger's **calculated allocation**, not proof that a payment has been made. No payment processor or payment initiation is integrated.

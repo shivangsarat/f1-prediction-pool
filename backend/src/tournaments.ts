@@ -2,110 +2,219 @@ import {createHash, randomBytes, randomUUID} from 'node:crypto';
 import {all, get, run, transaction} from './db.ts';
 import {HttpError, bad, type User} from './auth.ts';
 
-export type TournamentRole = 'commissioner' | 'player';
+export type TournamentRole = 'operator' | 'commissioner' | 'player';
+export type Visibility = 'public' | 'invite_only';
 
-/** Normalize tournament names while rejecting markup-like or excessively long input. */
+/** Return true only for the platform-wide operator, never for a tournament commissioner. */
+export function isOperator(user: User): boolean {
+  return user.role === 'admin';
+}
+
+/** Normalize a tournament name and reject HTML/control characters. */
 export function tournamentName(value: unknown): string {
-
   if (typeof value !== 'string') throw bad('Tournament name is required');
   const name = value.trim();
-  if (name.length < 3 || name.length > 80 || /[<>]/.test(name) || [...name].some(char => char.charCodeAt(0) < 32)) {
-
+  if (name.length < 3 || name.length > 80 || /[<>\x00-\x1f]/.test(name)) {
     throw bad('Tournament name must contain 3–80 printable characters');
   }
   return name;
 }
 
-/** Hash an invitation code so database disclosure does not reveal invitations. */
-export function inviteHash(code: string): string {
+/** Validate and normalize a public or invitation-only discovery setting. */
+export function tournamentVisibility(value: unknown): Visibility {
+  if (value !== 'public' && value !== 'invite_only') throw bad('Visibility must be public or invite_only');
+  return value;
+}
 
+/** Hash a high-entropy invitation token so the database contains no usable invite links. */
+export function inviteHash(code: string): string {
   return createHash('sha256').update(code).digest('hex');
 }
 
-/** Generate a cryptographically random, URL-safe invite code. */
+/** Generate an unpredictable URL-safe invitation code. */
 export function newInviteCode(): string {
-
   return randomBytes(24).toString('base64url');
 }
 
-/** Return only tournaments of which the caller is a member. */
-export function listTournaments(user: User) {
+/** Select only the safe, public-facing tournament fields and membership count. */
+const tournamentFields = `t.id,t.name,t.description,t.owner_id,t.visibility,t.status,t.created_at,
+  (SELECT COUNT(*) FROM tournament_members tm WHERE tm.tournament_id=t.id) AS memberCount`;
 
-  return all(`SELECT t.id,t.name,t.description,t.owner_id,t.created_at,m.role,
-     (SELECT COUNT(*) FROM tournament_members tm WHERE tm.tournament_id=t.id) AS memberCount
-     FROM tournaments t JOIN tournament_members m ON m.tournament_id=t.id
-     WHERE m.user_id=? ORDER BY t.created_at DESC`, user.id);
+/** List tournaments visible to a user; an operator can administer all tournaments. */
+export function listTournaments(user: User) {
+  if (isOperator(user)) {
+    return all(`SELECT ${tournamentFields},'operator' AS role FROM tournaments t ORDER BY t.created_at DESC`);
+  }
+  return all(`SELECT ${tournamentFields},m.role FROM tournaments t
+    JOIN tournament_members m ON m.tournament_id=t.id WHERE m.user_id=?
+    ORDER BY t.created_at DESC`, user.id);
 }
 
-/** Require membership, returning HTTP 404 for tournaments outside the caller's scope. */
-export function requireTournament(user: User, tournamentId: string) {
+/** Return a minimal, bounded, active public tournament catalogue without exposing private invitations. */
+export function publicCatalogue(query = '') {
+  const search = String(query).trim().slice(0, 80).replace(/[\\%_]/g, '\\$&');
+  return all(`SELECT ${tournamentFields} FROM tournaments t
+    WHERE t.visibility='public' AND t.status='active'
+      AND (t.name LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
+    ORDER BY t.created_at DESC LIMIT 100`, `%${search}%`, `%${search}%`);
+}
 
-  const t = get(`SELECT t.id,t.name,t.description,t.owner_id,t.created_at,m.role,
-    (SELECT COUNT(*) FROM tournament_members tm WHERE tm.tournament_id=t.id) AS memberCount
-    FROM tournaments t JOIN tournament_members m ON m.tournament_id=t.id
-    WHERE t.id=? AND m.user_id=?`, tournamentId, user.id);
-  if (!t) throw new HttpError(404, 'Tournament not found');
+/** Require membership or global operator permission, hiding inaccessible private pools. */
+export function requireTournament(user: User, tournamentId: string) {
+  const t = get(`SELECT ${tournamentFields},m.role AS member_role FROM tournaments t
+    LEFT JOIN tournament_members m ON m.tournament_id=t.id AND m.user_id=? WHERE t.id=?`, user.id, tournamentId);
+  if (!t || (!isOperator(user) && !t.member_role)) throw new HttpError(404, 'Tournament not found');
+  const {member_role, ...safe} = t;
+  return {...safe, role: isOperator(user) ? 'operator' : member_role};
+}
+
+/** Authorize settings, results, invites, and ledger operations for a commissioner or global operator. */
+export function requireCommissioner(user: User, tournamentId: string) {
+  const t = requireTournament(user, tournamentId);
+  if (t.role !== 'commissioner' && t.role !== 'operator') {
+    throw new HttpError(403, 'Tournament commissioner privileges required');
+  }
   return t;
 }
 
-/** Enforce tournament-local commissioner privileges; global roles do not bypass isolation. */
-export function requireCommissioner(user: User, tournamentId: string) {
-
-  const member = requireTournament(user, tournamentId);
-  if (member.role !== 'commissioner') throw new HttpError(403, 'Tournament commissioner privileges required');
-  return member;
+/** Validate and truncate a plain-text tournament description. */
+function descriptionValue(value: unknown): string {
+  const description = typeof value === 'string' ? value.trim() : '';
+  if (description.length > 500 || /[<>\x00-\x08]/.test(description)) {
+    throw bad('Description must contain up to 500 plain-text characters');
+  }
+  return description;
 }
 
-/** Create a tournament and grant its creator local commissioner privileges atomically. */
-export function createTournament(user: User, name: unknown, description: unknown) {
-
-  const safeName = tournamentName(name);
-  const safeDescription = typeof description === 'string' ? description.trim() : '';
-  if (safeDescription.length > 500 || /[<>]/.test(safeDescription) || [...safeDescription].some(char => char.charCodeAt(0) < 9)) throw bad('Description must contain up to 500 plain-text characters');
+/** Create a tournament and atomically grant the creator its local commissioner role. */
+export function createTournament(user: User, name: unknown, description: unknown, visibility: unknown = 'invite_only') {
+  const safeName = tournamentName(name), safeDescription = descriptionValue(description);
+  const safeVisibility = tournamentVisibility(visibility);
   const id = randomUUID(), inviteCode = newInviteCode(), now = new Date().toISOString();
   return transaction(() => {
-
-    run('INSERT INTO tournaments VALUES(?,?,?,?,?,?)', id, safeName, safeDescription, user.id, inviteHash(inviteCode), now);
+    run(`INSERT INTO tournaments(id,name,description,owner_id,invite_hash,created_at,visibility,status)
+      VALUES(?,?,?,?,?,?,?,'active')`, id, safeName, safeDescription, user.id, inviteHash(inviteCode), now, safeVisibility);
     run('INSERT INTO tournament_members VALUES(?,?,?,?)', id, user.id, 'commissioner', now);
-    return {id, name: safeName, description: safeDescription, role: 'commissioner', memberCount: 1, inviteCode};
+    return {...requireTournament(user, id), inviteCode};
   });
 }
 
-/** Join exactly one tournament by a secret invitation; repeated joins are idempotent. */
-export function joinTournament(user: User, code: unknown) {
-
-  if (typeof code !== 'string' || code.length < 20 || code.length > 128) throw bad('Invalid invitation code');
+/** Allow members of a public pool to join by ID without learning any private invitation. */
+export function joinPublicTournament(user: User, tournamentId: string) {
   return transaction(() => {
-
-    const tournament = get('SELECT id FROM tournaments WHERE invite_hash=?', inviteHash(code));
-    if (!tournament) throw new HttpError(404, 'Invitation code not recognized');
-    run("INSERT OR IGNORE INTO tournament_members VALUES(?,?,?,?)", tournament.id, user.id, 'player', new Date().toISOString());
-    return requireTournament(user, tournament.id);
+    const t = get("SELECT id FROM tournaments WHERE id=? AND visibility='public' AND status='active'", tournamentId);
+    if (!t) throw new HttpError(404, 'Public tournament not found');
+    run("INSERT OR IGNORE INTO tournament_members VALUES(?,?,?,?)", tournamentId, user.id, 'player', new Date().toISOString());
+    return requireTournament(user, tournamentId);
   });
 }
 
-/** Rotate the invitation code, invalidating any previously issued codes. */
-export function rotateInvite(user: User, tournamentId: string) {
+/** Preview a valid invite without exposing the secret or any private tournament records. */
+export function invitePreview(code: unknown) {
+  if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(code)) throw new HttpError(404, 'Invitation not found');
+  const t = get(`SELECT ${tournamentFields} FROM tournaments t WHERE t.invite_hash=? AND t.status='active'`, inviteHash(code));
+  if (!t) throw new HttpError(404, 'Invitation not found');
+  return t;
+}
 
+/** Join one active tournament using a secret link; repeat requests do not duplicate memberships. */
+export function joinTournament(user: User, code: unknown) {
+  return transaction(() => {
+    const t = invitePreview(code);
+    run("INSERT OR IGNORE INTO tournament_members VALUES(?,?,?,?)", t.id, user.id, 'player', new Date().toISOString());
+    return requireTournament(user, t.id);
+  });
+}
+
+/** Rotate the join link and revoke old shared invitations. */
+export function rotateInvite(user: User, tournamentId: string) {
   requireCommissioner(user, tournamentId);
   const inviteCode = newInviteCode();
   run('UPDATE tournaments SET invite_hash=? WHERE id=?', inviteHash(inviteCode), tournamentId);
   return {inviteCode};
 }
 
-/** Ensure an entity's season belongs to a tournament the caller joined. */
-export function requireSeasonMember(user: User, seasonId: string) {
-
-  const season = get('SELECT * FROM seasons WHERE id=?', seasonId);
-  if (!season) throw new HttpError(404, 'Season not found');
-  requireTournament(user, season.tournament_id);
-  return season;
+/** Update public/private visibility, archive status, and editable tournament metadata. */
+export function amendTournament(user: User, tournamentId: string, changes: Record<string, unknown>) {
+  const current = requireCommissioner(user, tournamentId);
+  const name = changes.name === undefined ? current.name : tournamentName(changes.name);
+  const description = changes.description === undefined ? current.description : descriptionValue(changes.description);
+  const visibility = changes.visibility === undefined ? current.visibility : tournamentVisibility(changes.visibility);
+  const status = changes.status === undefined ? current.status : changes.status;
+  if (!['active', 'archived'].includes(String(status))) throw bad('Invalid tournament status');
+  run('UPDATE tournaments SET name=?,description=?,visibility=?,status=? WHERE id=?', name, description, visibility, status, tournamentId);
+  return requireTournament(user, tournamentId);
 }
 
-/** Require commissioner access on the tournament that owns the provided season. */
-export function requireSeasonCommissioner(user: User, seasonId: string) {
+/** Search a small, non-sensitive directory of existing users by exact username prefix. */
+export function searchUsers(user: User, tournamentId: string, query: string) {
+  requireCommissioner(user, tournamentId);
+  const term = String(query).trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{2,32}$/.test(term)) throw bad('Enter at least two username characters');
+  return all(`SELECT u.id,u.username,u.display_name FROM users u WHERE lower(u.username) LIKE ? ESCAPE '\\'
+    AND NOT EXISTS (SELECT 1 FROM tournament_members m WHERE m.tournament_id=? AND m.user_id=u.id)
+    ORDER BY u.username LIMIT 10`, `${term.replace(/[\\%_]/g, '\\$&')}%`, tournamentId);
+}
 
-  const season = requireSeasonMember(user, seasonId);
-  requireCommissioner(user, season.tournament_id);
-  return season;
+/** Invite an existing user once, without automatically adding them to a private tournament. */
+export function inviteExistingUser(user: User, tournamentId: string, targetId: string) {
+  requireCommissioner(user, tournamentId);
+  const target = get('SELECT id,email,username,display_name FROM users WHERE id=?', targetId);
+  if (!target) throw new HttpError(404, 'User not found');
+  if (target.id === user.id) throw bad('Cannot invite yourself');
+  const t = get('SELECT status FROM tournaments WHERE id=?', tournamentId);
+  if (t?.status !== 'active') throw new HttpError(409, 'Archived tournaments do not accept invitations');
+  const recent = get('SELECT COUNT(*) AS count FROM tournament_user_invites WHERE invited_by=? AND created_at>?',
+    user.id, new Date(Date.now() - 86400000).toISOString())?.count ?? 0;
+  if (recent >= 50 && !isOperator(user)) throw new HttpError(429, 'Invitation quota reached for this account');
+  if (get('SELECT 1 FROM tournament_members WHERE tournament_id=? AND user_id=?', tournamentId, targetId)) {
+    throw new HttpError(409, 'User is already a participant');
+  }
+  return transaction(() => {
+    const invitationId = randomUUID(), createdAt = new Date().toISOString();
+    run(`INSERT INTO tournament_user_invites(id,tournament_id,user_id,invited_by,status,created_at)
+      VALUES(?,?,?,?,'pending',?)
+      ON CONFLICT(tournament_id,user_id) DO UPDATE SET invited_by=excluded.invited_by,status='pending',created_at=excluded.created_at`,
+    invitationId, tournamentId, targetId, user.id, createdAt);
+    return {tournamentId, userId: targetId, username: target.username, status: 'pending'};
+  });
+}
+
+/** Return each authenticated user's invitations, never other users' pending invites. */
+export function myInvitations(user: User) {
+  return all(`SELECT i.id,i.tournament_id,t.name,t.visibility,i.created_at
+    FROM tournament_user_invites i JOIN tournaments t ON t.id=i.tournament_id
+    WHERE i.user_id=? AND i.status='pending' AND t.status='active'
+    ORDER BY i.created_at DESC`, user.id);
+}
+
+/** Accept or decline one invitation, checking that it is addressed to the current user. */
+export function respondInvitation(user: User, invitationId: string, action: unknown) {
+  if (action !== 'accept' && action !== 'decline') throw bad('Invalid invitation decision');
+  return transaction(() => {
+    const invite = get(`SELECT i.* FROM tournament_user_invites i JOIN tournaments t ON t.id=i.tournament_id
+      WHERE i.id=? AND i.user_id=? AND i.status='pending' AND t.status='active'`, invitationId, user.id);
+    if (!invite) throw new HttpError(404, 'Invitation not found');
+    run('UPDATE tournament_user_invites SET status=? WHERE id=?', action === 'accept' ? 'accepted' : 'declined', invitationId);
+    if (action === 'accept') {
+      run("INSERT OR IGNORE INTO tournament_members VALUES(?,?,?,?)", invite.tournament_id, user.id, 'player', new Date().toISOString());
+      return requireTournament(user, invite.tournament_id);
+    }
+    return {status: 'declined'};
+  });
+}
+
+/** Check season access using the owning tournament and the global operator override. */
+export function requireSeasonMember(user: User, seasonId: string) {
+  const s = get('SELECT * FROM seasons WHERE id=?', seasonId);
+  if (!s) throw new HttpError(404, 'Season not found');
+  requireTournament(user, s.tournament_id);
+  return s;
+}
+
+/** Require commissioner/operator permission over the season's owning tournament. */
+export function requireSeasonCommissioner(user: User, seasonId: string) {
+  const s = requireSeasonMember(user, seasonId);
+  requireCommissioner(user, s.tournament_id);
+  return s;
 }

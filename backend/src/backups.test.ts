@@ -19,7 +19,7 @@ test('createBackup writes an encrypted, consistent SQLite snapshot', async () =>
 
   const key = '43'.repeat(32);
   process.env.BACKUP_ENCRYPTION_KEY = key;
-  run('INSERT INTO users VALUES(?,?,?,?,?,?)', 'u1', 'backup@example.test', 'Backup Test', 'testhash', 'participant', new Date().toISOString());
+  run('INSERT INTO users(id,email,display_name,password_hash,role,created_at) VALUES(?,?,?,?,?,?)', 'u1', 'backup@example.test', 'Backup Test', 'testhash', 'participant', new Date().toISOString());
   const backup = await createBackup();
   assert.equal(backup.encrypted, true);
   assert.equal(backup.offsite, false);

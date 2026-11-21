@@ -132,6 +132,49 @@ export function migrateLegacyDatabase(): void {
 }
 migrateLegacyDatabase();
 
+/** Add optional directory, catalogue and direct-invite fields without rebuilding financial tables. */
+export function migrateDiscoverability(): void {
+  const cols = (table: string) => new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>).map(c => c.name));
+  const tournaments = cols('tournaments');
+  if (!tournaments.has('visibility')) db.exec("ALTER TABLE tournaments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'invite_only' CHECK(visibility IN ('public','invite_only'))");
+  if (!tournaments.has('status')) db.exec("ALTER TABLE tournaments ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived'))");
+  const users = cols('users');
+  if (!users.has('username')) db.exec('ALTER TABLE users ADD COLUMN username TEXT');
+  if (!users.has('email_verified_at')) db.exec('ALTER TABLE users ADD COLUMN email_verified_at TEXT');
+  if (!users.has('notification_opt_in')) db.exec('ALTER TABLE users ADD COLUMN notification_opt_in INTEGER NOT NULL DEFAULT 1');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_username ON users(username COLLATE NOCASE) WHERE username IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tournaments_discover ON tournaments(visibility,status,created_at);
+    CREATE TABLE IF NOT EXISTS tournament_user_invites (
+      id TEXT PRIMARY KEY,tournament_id TEXT NOT NULL REFERENCES tournaments(id),
+      user_id TEXT NOT NULL REFERENCES users(id),invited_by TEXT NOT NULL REFERENCES users(id),
+      status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined')),
+      created_at TEXT NOT NULL,UNIQUE(tournament_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_invites ON tournament_user_invites(user_id,status);
+    CREATE TABLE IF NOT EXISTS email_outbox (
+      id TEXT PRIMARY KEY,event_key TEXT NOT NULL UNIQUE,user_id TEXT NOT NULL REFERENCES users(id),
+      tournament_id TEXT REFERENCES tournaments(id),subject TEXT NOT NULL,body TEXT NOT NULL,
+      created_at TEXT NOT NULL,next_attempt_at TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,
+      delivered_at TEXT,last_error TEXT,claimed_until TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_pending ON email_outbox(delivered_at,next_attempt_at);
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),
+      expires_at TEXT NOT NULL,created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_verify_user ON email_verifications(user_id,created_at);
+  `);
+  if (!cols('email_outbox').has('claimed_until')) db.exec('ALTER TABLE email_outbox ADD COLUMN claimed_until TEXT');
+  // Stable, unique usernames for existing users preserve historical user IDs and sessions.
+  for (const u of db.prepare('SELECT id,display_name FROM users WHERE username IS NULL').all() as Array<{id:string,display_name:string}>) {
+    const base = u.display_name.toLowerCase().replace(/[^a-z0-9_.-]+/g, '_').replace(/^[_\.\-]+|[_\.\-]+$/g, '').slice(0,18) || 'player';
+    const username = `${base}_${u.id.replace(/-/g, '').slice(0,8)}`;
+    db.prepare('UPDATE users SET username=? WHERE id=?').run(username, u.id);
+  }
+}
+migrateDiscoverability();
+
+
 export type Row = Record<string, any>;
 /**
  * Get the first SQLite row matching a parameterized query, or undefined.

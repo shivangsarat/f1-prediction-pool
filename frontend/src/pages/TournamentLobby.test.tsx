@@ -1,9 +1,9 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {TournamentLobby} from './TournamentLobby';
-import {post} from '../api';
+import {get, post} from '../api';
 
-vi.mock('../api', () => ({post: vi.fn()}));
+vi.mock('../api', () => ({post: vi.fn(), get: vi.fn(), patch: vi.fn()}));
 afterEach(cleanup);
 const mockPost = vi.mocked(post);
 const tournament = {id: 'a', name: 'Paddock Championship', description: 'Friends league', role: 'commissioner' as const, memberCount: 4};
@@ -11,7 +11,7 @@ const tournament = {id: 'a', name: 'Paddock Championship', description: 'Friends
 /** Validate that existing tournament cards navigate to the selected tournament. */
 describe('TournamentLobby', () => {
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {vi.clearAllMocks(); vi.mocked(get).mockImplementation((path: string) => Promise.resolve(path === '/invitations' ? [] : {emailVerified: true, notificationOptIn: true, available: false}));});
   it('shows accessible tournaments and navigates on selection', () => {
 
     const open = vi.fn();
@@ -30,8 +30,8 @@ describe('TournamentLobby', () => {
     fireEvent.change(screen.getByPlaceholderText('2027 Friends Championship'), {target: {value: 'New Racers'}});
     fireEvent.change(screen.getByPlaceholderText('Weekend prediction challenge'), {target: {value: 'For colleagues'}});
     fireEvent.click(screen.getByRole('button', {name: /Create tournament/i}));
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tournaments', {name: 'New Racers', description: 'For colleagues'}));
-    expect(await screen.findByText('one-time-code')).toBeTruthy();
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith('/tournaments', {name: 'New Racers', description: 'For colleagues', visibility: 'invite_only'}));
+    expect(await screen.findByText(/one-time-code/)).toBeTruthy();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 

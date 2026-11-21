@@ -1,6 +1,6 @@
 # GRIDLOCK — F1 Prediction Pool
 
-A multi-tournament Formula 1 prediction platform based on the finalized [system and scoring specification](docs/design-spec.pdf). Participants can **create a tournament, invite other users, and enter that tournament's own prediction workspace**. Parallel pools can share players without sharing their picks, scores, roles or financial ledgers.
+A multi-tournament Formula 1 prediction platform based on the finalized [system and scoring specification](docs/design-spec.pdf). Participants can **create a public or invite-only tournament, invite users by username or joining link, browse public competitions, and enter that tournament's own prediction workspace**. Parallel pools can share players without sharing their picks, scores, roles or financial ledgers.
 
 This is an unofficial F1 fan project. It **does not accept card payments, process transfers, or hold funds**; commissioners manually record transactions settled elsewhere.
 
@@ -9,7 +9,8 @@ This is an unofficial F1 fan project. It **does not accept card payments, proces
 ```text
 f1-prediction-pool/
 ├── frontend/                  # Standalone React/TypeScript client
-│   ├── src/pages/             # TournamentLobby, TournamentWorkspace, Picks, Rules, Admin...
+│   ├── src/pages/             # Catalogue, Lobby, TournamentWorkspace, Picks, Rules, Admin...
+│   ├── src/components/        # Typed, reusable invitations, management and notification UI
 │   ├── src/shared/            # Reusable typed UI components
 │   ├── src/*.test.ts          # Client API tests
 │   ├── docker/nginx.conf      # Production static SPA + reverse proxy
@@ -17,7 +18,8 @@ f1-prediction-pool/
 │   └── package.json           # Independent install, build, lint, tests
 ├── backend/                   # Standalone Node.js 22 native HTTP API
 │   ├── src/auth.ts            # Scrypt, HttpOnly sessions, rate limiting
-│   ├── src/tournaments.ts     # Membership & commissioner authorization
+│   ├── src/tournaments.ts     # Public/private catalogue, membership, operator and commissioner authorization
+│   ├── src/email.ts           # Gmail/Brevo/Resend, encrypted outbox and deadline mail
 │   ├── src/db.ts              # Durable SQLite WAL + legacy migration
 │   ├── src/http.ts            # Request validation, CSRF, response hardening
 │   ├── src/server.ts          # HTTP routing and race operations
@@ -68,11 +70,13 @@ npm run dev --prefix backend
 npm run dev --prefix frontend
 ```
 
-Open `http://localhost:5173`, register an account (password at least 12 characters), and **create your first prediction tournament**. The creator becomes that tournament's commissioner automatically; no global operator key is needed for tournament creation. Copy the one-time invitation code to invite other users. Returning players can join more than one tournament with separate codes.
+Open `http://localhost:5173`, register an account (password at least 12 characters) and choose a unique username. Create a tournament and choose **public** (visible in the separate public catalogue) or **invite-only** (hidden). The creator becomes commissioner automatically. Share the one-time invitation URL, or invite an existing user by searching their username. A recipient must explicitly accept a username invitation. Returning players can join multiple tournaments without creating a new account.
+
+A secret link such as `https://gridlock.example/?invite=<token>` preserves its destination across registration/sign-in: existing signed-in users join and open the competition; guests see registration first, with an existing-account sign-in option, then join/open the specific tournament. Guests can also browse active public competitions, and after signing up are redirected to the chosen public pool.
 
 Choose a tournament from the lobby to open its **Race HQ, predictions, round leaderboard, season standings, championship picks, rules, prize ledger and commissioner functions**. Each screen makes tournament-authorized API requests, even if someone forges a season ID or edits a URL manually.
 
-Commissioners can create a season, set locks and payout cutoffs, configure rosters/calendars, stage OpenF1 results, preview scoring, publish classifications, and record settled buy-ins. A global operator account is **only** needed for database-wide maintenance backups.
+Commissioners can edit their own tournament’s name, public/private visibility and archive state; invite existing usernames; create seasons; set locks/payout cutoffs; configure rosters/calendars; stage OpenF1 results; preview/publish scores; and record settled financial ledger entries. **The global operator (`users.role=admin`) can see and administer every tournament, regardless of membership, and can also perform database-wide maintenance.** Normal users see only tournaments they own or joined. All financial operations retain their audit trail and ledger invariants.
 
 ## Production deployment
 
@@ -97,12 +101,22 @@ Read [operations and recovery](docs/OPERATIONS.md) before migrating an existing 
 
 ## Multi-tournament design
 
-- Users are registered once, with distinct membership and commissioner permissions **per tournament**.
+- Users are registered once with a unique, case-insensitive username. Their individual memberships/commissioner privileges are **per tournament**. The global operator is explicitly exempt from membership restrictions, without silently adding a membership record.
 - Each tournament can configure its own seasons, including the same calendar year as another tournament.
 - Weekends, submissions, scoring, championship picks, entrant payments, payout projections and audits belong to an authorized tournament through its season.
-- Invitation codes are cryptographically random, stored only as hashes, and invalidated when rotated. A returning member can join another pool without creating a new account.
-- HTTP routes never trust the tournament selected in the browser: the API checks membership for the actual season/weekend being requested. Even the optional global operator role does not bypass this boundary.
+- Private join links use cryptographically random invitation codes, stored only as hashes and invalidated on rotation. Existing-user invitations are pending until the invited account accepts. Public tournaments are in a separate active catalogue and allow click-to-join for authenticated users.
+- HTTP routes never trust the tournament selected in the browser: the API checks membership for the actual season/weekend being requested. Only the global operator can bypass tournament membership authorization; the operator still cannot override immutable submissions, official result publication freezes, or negative-cash ledger safeguards.
 - A preexisting v1 database is migrated into a dedicated **Legacy F1 Pool** tournament. Existing users remain members and previous seasons, submissions and ledger records are retained. **Back up the DB before upgrading.**
+
+## Global operator and official email
+
+Set `ADMIN_EMAIL` to the intended operator's Gmail address (for example `operator@gmail.com`) and configure a long, random `ADMIN_BOOTSTRAP_KEY`. The configured email can register as a privileged operator only when presenting that secret. To promote an **already registered** operator Gmail account from a trusted server shell, use `scripts/promote-operator.mjs` with the exact bootstrap secret and a local database backup; never expose that CLI key in frontend code.
+
+Email is **optional and disabled by default**. If enabled, the backend can send official transaction-like emails for verified/opted-in users: invitations, creation/join confirmations, submission receipts, post-lock no-submission and public-reveal alerts, results/current standings and final prize-share allocations. The queue is persistent, encrypted and replay-safe; send failures cannot change picks, deadlines, results or cash balances.
+
+Configure `MAIL_PROVIDER=gmail` for the admin’s actual Gmail account using Gmail API OAuth2 credentials, or choose `brevo` or `resend` for their free transactional tiers (they normally require a verified sender/domain). Set `APP_PUBLIC_URL` and `MAIL_ENCRYPTION_KEY`/`BACKUP_ENCRYPTION_KEY`; do not commit OAuth tokens. Follow **[provider setup, free quotas and email operations](docs/EMAIL.md)**. Gmail personal accounts are subject to sending limits and Google OAuth/consent requirements; this is not an unlimited free bulk-mail service.
+
+Operator mail-status and manual reconciliation are available from the lobby when signed into a global operator account. Session-lock notification messages are reconciled automatically on startup and periodically, including when the machine was powered off during the deadline; the server UTC lock itself never depends on this process.
 
 ## Rules
 
