@@ -30,7 +30,7 @@ export const fieldExplanations: Record<string, {name: string; detail: string}> =
   'EVIDENCE TIME': {name: 'Evidence timestamp', detail: 'Timestamp proving a prediction was received before the actual qualifying lock during an outage.'},
   'EVIDENCE NOTE / SOURCE': {name: 'Evidence source and note', detail: 'An auditable reference to the original pre-lock message or screenshot; the commissioner cannot invent a late pick.'},
   'AMOUNT (CENTS)': {name: 'Transaction amount (cents)', detail: 'Whole-cent amount for the ledger entry, not a charge made by GRIDLOCK. Payouts and refunds are independently validated.'},
-  DESCRIPTION: {name: 'Description', detail: 'A short explanation of this tournament or ledger transaction, retained for participants and audit reviewers.'},
+  'TRANSACTION DESCRIPTION': {name: 'Reason for transaction', detail: 'Explanation of this buy-in, refund, adjustment or payout. Stored in the audit-friendly season ledger.'},
   'Tournament': {name: 'Tournament', detail: 'Name of this competition.'},
 };
 
