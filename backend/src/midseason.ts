@@ -79,6 +79,28 @@ export function validateMidseasonConfiguration(input: {
   return preview;
 }
 
+/**
+ * Validate an optional salvage interval against the season year and UTC clock.
+ * A newly activated window must still be in the future; archived seasons are
+ * not changed retroactively by this check.
+ * @param year - The F1 season year, not the browser's currently selected year.
+ * @param start - UTC timestamp at the beginning of the August seven-day window.
+ * @param end - UTC timestamp exactly seven days after start.
+ * @param evaluatedAt - UTC creation/amendment time, injectable for deterministic tests.
+ */
+export function validateSalvageWindow(year: number, start: string, end: string, evaluatedAt = Date.now()): void {
+  const from = Date.parse(start);
+  const until = Date.parse(end);
+  if (!Number.isFinite(from) || !Number.isFinite(until) || until - from !== 7 * 86400000 ||
+      new Date(from).getUTCFullYear() !== year || new Date(until).getUTCFullYear() !== year ||
+      new Date(from).getUTCMonth() !== 7 || new Date(until).getUTCMonth() !== 7) {
+    throw bad('Salvage must be exactly seven days entirely inside August UTC of the selected season year');
+  }
+  if (evaluatedAt >= from) {
+    throw new HttpError(409, 'The August salvage window has already begun or passed; disable salvage for this new tournament');
+  }
+}
+
 /** Return the effective priority tier for an encrypted transactional-email outbox event. */
 export function notificationPriority(eventKey: string): number {
   if (/^(locked:|result:|champions:|verification:|verify:)/.test(eventKey)) return 100;

@@ -16,6 +16,12 @@ Implementation reference: the two uploaded **v2.1 specifications** in `docs/spec
 - The mid-season calendar import excludes `round < openingRound` and sessions whose earliest qualifying lock is **not later than the tournament creation timestamp**. Both `upcomingOnly:true` and `startFromRound` are supported; on mid-season pools the future-only filter is mandatory. Commissioners may manually add upcoming weekends; neither route can insert a finished real-world race into a new mid-season season.
 - Paid mid-season buy-ins require a complete persisted upcoming calendar: at least three rounds, `MIN(round) === openingRound`, and a race count matching the announced expected count. A different scope must be explicitly corrected before launch; a commissioner cannot retroactively modify a locked tournament.
 
+## Current-year post-August launches (example: November 2026)
+
+When opening a mid-season tournament **after August has started**, select the first **upcoming real F1 round** and the remaining race count. Disable WDC/WCC championship picks and August salvage (pure race-by-race). No August dates are required or submitted. A 1–2 round cup must have zero entry fee; 3+ future rounds may permit paid entries once the calendar is complete. A retroactive Round-1/full-season launch for the already elapsed year is rejected. Existing pools are not altered.
+
+Eligible future-year August windows are entered and labelled as **UTC**, serialized with an explicit `Z` suffix rather than the browser timezone. In Europe/Dublin, `1 August 00:00` local can translate to `31 July 23:00 UTC`; this previously caused a false rejection. The UI uses year-specific `2 August 12:00 UTC` to `9 August 12:00 UTC` example defaults. The server validates selected year, full seven-day August UTC containment, and a window that has not already started for newly activated salvage. Old locked seasons retain their persisted windows.
+
 ## Championship and salvage options
 
 | Launch | Races remaining | WDC/WCC | August salvage |

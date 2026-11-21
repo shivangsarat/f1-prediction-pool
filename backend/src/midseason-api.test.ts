@@ -92,6 +92,11 @@ test('post-August mini-cup uses pure race-by-race and protects paid contribution
   let r=await call('/tournaments','POST',{name:'Late-Season Free Sprint',visibility:'invite_only',openingRound:23,expectedRaces:2,year:2028},operator);
   assert.equal(r.status,201);
   const tid=r.body.id;
+  // A window from last August cannot be activated by a new mid-season pool in November.
+  r=await call('/admin/seasons','POST',{tournamentId:tid,year:2024,openingRound:23,expectedRaces:2,baseEntryCents:0,
+    championshipEnabled:false,salvageEnabled:true,salvageStart:'2024-08-02T12:00:00Z',salvageEnd:'2024-08-09T12:00:00Z'},operator);
+  assert.equal(r.status,409);
+  assert.match(r.body.error, /August salvage window has already/i);
   r=await call('/admin/seasons','POST',{tournamentId:tid,year:2028,openingRound:23,expectedRaces:2,baseEntryCents:1000,
     championshipEnabled:false,salvageEnabled:false},operator);
   assert.equal(r.status,409);

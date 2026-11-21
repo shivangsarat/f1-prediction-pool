@@ -1,4 +1,5 @@
 import {Notice} from '../shared/ui';
+import {postAugustMidseason} from './seasonDates';
 
 /** Server-persisted opening-round policy selected by the commissioner before qualifying locks. */
 export type SeasonScopeFields = {
@@ -9,18 +10,23 @@ export type SeasonScopeFields = {
 };
 
 /** Show race-count-based championship scaling and conditional August salvage rules. */
-export function SeasonScopeSettings({value, onChange, locked}: {
-  value: SeasonScopeFields; onChange: (next: SeasonScopeFields) => void; locked?: boolean;
+export function SeasonScopeSettings({value, onChange, locked, seasonYear}: {
+  value: SeasonScopeFields; onChange: (next: SeasonScopeFields) => void; locked?: boolean; seasonYear?: number;
 }) {
   const mid = value.openingRound > 1;
   const bonus = mid ? Math.round(25 * value.expectedRaces / 24) : 25;
   const penalty = mid ? Math.round(15 * value.expectedRaces / 24) : 15;
   const warnPaid = mid && value.expectedRaces < 3;
+  const pastAugust = seasonYear !== undefined && postAugustMidseason(seasonYear, value.openingRound);
 
   /** Change independent options while clearing salvage when championship picks are turned off. */
   function patch(next: Partial<SeasonScopeFields>) {
     const merged = {...value,...next};
-    if (!merged.championshipEnabled) merged.salvageEnabled = false;
+    if (!merged.championshipEnabled || (seasonYear !== undefined && postAugustMidseason(seasonYear, merged.openingRound))) merged.salvageEnabled = false;
+    if (merged.openingRound > 1 && (merged.expectedRaces < 10 || (seasonYear !== undefined && postAugustMidseason(seasonYear, merged.openingRound)))) {
+      merged.championshipEnabled = false;
+      merged.salvageEnabled = false;
+    }
     onChange(merged);
   }
 
@@ -34,12 +40,13 @@ export function SeasonScopeSettings({value, onChange, locked}: {
         <input type="number" aria-label="Scheduled races" min={0} max={40} disabled={locked} value={value.expectedRaces} onChange={e => patch({expectedRaces:Number(e.target.value)})}/>
       </label>
     </div>
-    <label className="check-line"><input type="checkbox" disabled={locked} checked={value.championshipEnabled} onChange={e => patch({championshipEnabled:e.target.checked})}/> Enable WDC/WCC championship predictions</label>
-    <label className="check-line"><input type="checkbox" disabled={locked || !value.championshipEnabled} checked={value.salvageEnabled} onChange={e => patch({salvageEnabled:e.target.checked})}/> Enable August summer-break salvage (only if at least four scheduled rounds finish before August)</label>
+    <label className="check-line"><input type="checkbox" disabled={locked || pastAugust || (mid && value.expectedRaces < 10)} checked={value.championshipEnabled} onChange={e => patch({championshipEnabled:e.target.checked})}/> Enable WDC/WCC championship predictions</label>
+    <label className="check-line"><input type="checkbox" disabled={locked || !value.championshipEnabled || pastAugust} checked={value.salvageEnabled} onChange={e => patch({salvageEnabled:e.target.checked})}/> Enable August summer-break salvage (only if at least four scheduled rounds finish before August)</label>
     <Notice>{mid ? `Mid-Season · Starts R${value.openingRound} · ${value.expectedRaces} Races.` : 'Full Season.'}
       {' '}{value.championshipEnabled ? `Correct championship picks earn +${bonus} points each.` : 'Pure Race-by-Race Mode — no championship bonuses.'}
       {' '}{value.salvageEnabled ? `Changed picks cost −${penalty} points each after August salvage.` : 'August salvage is disabled.'}
     </Notice>
+    {pastAugust && <Notice>After August, a new mid-season pool uses pure race-by-race scoring. Championship picks and salvage are unavailable; no August dates are needed.</Notice>}
     {warnPaid && <Notice kind="error">Fewer than three races remain. Only free/fun tournaments with a zero entry fee can launch.</Notice>}
     {mid && value.expectedRaces < 10 && value.championshipEnabled && <Notice kind="error">Mid-season championship picks need at least 10 pre-August races. Switch to Pure Race-by-Race Mode.</Notice>}
   </fieldset>;

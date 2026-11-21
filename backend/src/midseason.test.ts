@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {midseasonPreview, openingQualifying, scaledSeasonPoints, seasonScope, validateMidseasonConfiguration, notificationPriority} from './midseason.ts';
+import {midseasonPreview, openingQualifying, scaledSeasonPoints, seasonScope, validateMidseasonConfiguration, validateSalvageWindow, notificationPriority} from './midseason.ts';
 
 /** Full-season payouts and bonuses remain backward-compatible. */
 test('full-season mode retains original championship bonuses', () => {
@@ -49,4 +49,13 @@ test('dynamic opening lock respects Sprint format', () => {
 test('email priorities guard shared free transactional quotas', () => {
   assert.ok(notificationPriority('locked:race') > notificationPriority('invited:race'));
   assert.ok(notificationPriority('result:race') > notificationPriority('invited:race'));
+});
+
+/** The August dates are UTC-specific; a Dublin-local midnight can fall in July UTC. */
+test('salvage dates require seven August days in the chosen season and an upcoming window', () => {
+  const before = Date.parse('2027-06-01T00:00:00Z');
+  assert.doesNotThrow(() => validateSalvageWindow(2027, '2027-08-02T12:00:00Z', '2027-08-09T12:00:00Z', before));
+  assert.throws(() => validateSalvageWindow(2027, '2027-07-31T23:00:00Z', '2027-08-07T23:00:00Z', before), {status: 400});
+  assert.throws(() => validateSalvageWindow(2026, '2027-08-02T12:00:00Z', '2027-08-09T12:00:00Z', before), {status: 400});
+  assert.throws(() => validateSalvageWindow(2027, '2027-08-02T12:00:00Z', '2027-08-09T12:00:00Z', Date.parse('2027-11-21T00:00:00Z')), {status: 409});
 });

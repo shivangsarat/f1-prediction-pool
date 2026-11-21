@@ -24,3 +24,12 @@ it('freezes all settings at the opening lock', () => {
   expect((screen.getByLabelText('Opening F1 round') as HTMLInputElement).disabled).toBe(true);
   expect((screen.getByLabelText('Scheduled races') as HTMLInputElement).disabled).toBe(true);
 });
+
+/** After the August summer break, the creation UI prevents impossible mid-season options. */
+it('disables WDC/WCC and August salvage after the selected-year summer break', () => {
+  render(<SeasonScopeSettings value={{openingRound:20,expectedRaces:5,championshipEnabled:false,salvageEnabled:false}}
+    seasonYear={2026} onChange={vi.fn()}/>);
+  expect((screen.getByLabelText(/Enable WDC\/WCC/) as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/Enable August summer-break salvage/) as HTMLInputElement).disabled).toBe(true);
+  expect(screen.getByText(/After August, a new mid-season pool/)).toBeTruthy();
+});

@@ -10,7 +10,7 @@ import {queueNotification, requestEmailVerification, confirmEmail, mailProvider,
 import {utcNow, locked, formDeadline, validateGp, validateSprint, validateUnified, validateResult, scoreBallot, rankWithTies, validId, type GPClassification, type FormKind, type ScoreInput, type RankingRow, type SprintMode} from './rules.ts';
 import {financePlan, grossFromEntries} from './finance.ts';
 import {platformPolicy, updatePlatformPolicy, seasonFinanceConfig, snapshotFinance, financeProjection, tournamentTerms, validateSeasonFinanceChanges} from './financeStore.ts';
-import {openingQualifying, midseasonPreview, scaledSeasonPoints, validateMidseasonConfiguration} from './midseason.ts';
+import {openingQualifying, midseasonPreview, scaledSeasonPoints, validateMidseasonConfiguration, validateSalvageWindow} from './midseason.ts';
 
 // A production instance must be able to make encrypted backups before accepting payments or picks.
 if (process.env.NODE_ENV === 'production' && !/^[a-fA-F0-9]{64}$/.test(process.env.BACKUP_ENCRYPTION_KEY ?? '')) {
@@ -585,10 +585,10 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
     const pre = champEnabled && b.preseasonLock ? asUTC(b.preseasonLock, 'Opening championship lock') : null;
     const sStart = salvageEnabled ? asUTC(b.salvageStart, 'Salvage start') : null;
     const sEnd = salvageEnabled ? asUTC(b.salvageEnd, 'Salvage end') : null;
-    if (salvageEnabled && (Date.parse(sEnd!) - Date.parse(sStart!) !== 7 * 86400000 || new Date(sStart!).getUTCMonth() !== 7 || new Date(sEnd!).getUTCMonth() !== 7)) {
-      throw bad('Salvage window must be seven days inside August UTC');
-    }
+    if (salvageEnabled) validateSalvageWindow(year, sStart!, sEnd!);
     if (openingRound === 1 && (expectedRaces < 20 || expectedRaces > 24)) throw bad('Full seasons must configure the complete 20–24-round F1 calendar');
+    if (openingRound === 1 && Date.now() >= Date.UTC(year, 8, 1)) throw new HttpError(409, 'A full-season pool cannot start after August of its selected year; choose the first upcoming F1 round for a mid-season pool');
+    if (openingRound > 1 && Date.now() >= Date.UTC(year, 7, 1) && (champEnabled || salvageEnabled)) throw new HttpError(409, 'Post-August mid-season pools must use race-by-race scoring; disable championship picks and August salvage');
     if (openingRound > 1 && expectedRaces === 0 && base > 0) throw bad('Mid-season paid setup requires the remaining-race count from the calendar preview');
     if (expectedRaces > 0 && expectedRaces < 3 && base > 0) throw new HttpError(409, 'Paid tournaments need at least three future races');
     if (openingRound > 1 && champEnabled && expectedRaces < 10) throw bad('Mid-season championship picks need at least ten remaining races');
@@ -640,7 +640,15 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL): Promi
         const pre = champEnabled ? (b.preseasonLock ? asUTC(b.preseasonLock, 'Opening lock') : s.preseason_lock) : null;
         const salvageStart = salvageEnabled ? (b.salvageStart ? asUTC(b.salvageStart, 'Salvage start') : s.salvage_start) : null;
         const salvageEnd = salvageEnabled ? (b.salvageEnd ? asUTC(b.salvageEnd, 'Salvage end') : s.salvage_end) : null;
-        if (salvageEnabled && (!salvageStart || !salvageEnd || Date.parse(salvageEnd) - Date.parse(salvageStart) !== 7 * 86400000 || new Date(salvageStart).getUTCMonth() !== 7 || new Date(salvageEnd).getUTCMonth() !== 7)) throw bad('Salvage window must be seven August days');
+        if (salvageEnabled) {
+          if (!salvageStart || !salvageEnd) throw bad('Salvage dates must be provided when enabled');
+          validateSalvageWindow(s.year, salvageStart, salvageEnd,
+            !s.salvage_enabled || b.salvageStart !== undefined || b.salvageEnd !== undefined ? Date.now() : Date.parse(s.created_at));
+        }
+        if (openingRound > 1 && Date.now() >= Date.UTC(s.year, 7, 1) && (champEnabled || salvageEnabled) &&
+            (!s.championship_enabled || !s.salvage_enabled || b.championshipEnabled === true || b.salvageEnabled === true)) {
+          throw new HttpError(409, 'Post-August mid-season pools cannot enable championship or salvage options');
+        }
         run('UPDATE seasons SET sprint_mode=?,base_entry_cents=?,small_max=?,medium_max=?,championship_enabled=?,salvage_enabled=?,opening_round=?,expected_races=?,preseason_lock=?,salvage_start=?,salvage_end=? WHERE id=?',
           patch.sprint_mode, patch.base_entry_cents, patch.small_max, patch.medium_max, Number(champEnabled), Number(salvageEnabled), openingRound, expectedRaces, pre, salvageStart, salvageEnd, s.id);
         run('UPDATE tournaments SET launch_opening_round=?,launch_expected_races=? WHERE id=?', openingRound, expectedRaces, s.tournament_id);
