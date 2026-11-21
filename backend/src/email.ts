@@ -14,13 +14,12 @@ export function mailProvider(): MailProvider {
 
 /** Bound and encode HTML-free message strings to prevent header injection and mail abuse. */
 export function safeMailText(value: string, maxLength = 10000): string {
+  if (typeof value !== 'string' || value.length > maxLength) throw bad('Invalid notification text');
   const hasControlCharacters = [...value].some(char => {
     const code = char.charCodeAt(0);
     return code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31);
   });
-  if (typeof value !== 'string' || value.length > maxLength || hasControlCharacters) {
-    throw bad('Invalid notification text');
-  }
+  if (hasControlCharacters) throw bad('Invalid notification text');
   return value;
 }
 
