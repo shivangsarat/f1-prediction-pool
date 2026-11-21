@@ -4,6 +4,7 @@
   "version": "0.3.0",
   "description": "Independent Gridlock frontend and backend services, deployed together or separately",
   "scripts": {
+    "check:node": "node scripts/check-node.mjs",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
     "test": "npm test --prefix backend && npm test --prefix frontend",
@@ -11,5 +12,8 @@
     "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
     "format": "npm run format --prefix backend && npm run format --prefix frontend",
     "format:check": "npm run format:check --prefix backend && npm run format:check --prefix frontend"
+  },
+  "engines": {
+    "node": ">=22.16.0"
   }
 }

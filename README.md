@@ -53,6 +53,21 @@ There are **no cross-package runtime dependencies**. Each app has its own packag
 
 Requires Node.js **22.16+**, npm, and internet access to install React/Vite and test dependencies.
 
+**macOS Node version mismatch:** If the backend reports `bad option: --experimental-strip-types` / `bad option: --watch`, or Vite reports missing `node:fs/promises` exports, your shell is running an outdated Node binary. The project pins **22.16.0** in `.nvmrc` and `.node-version` to match CI. From the repository root:
+
+```bash
+node -v && which node
+nvm install     # reads .nvmrc; install nvm first if this command is unavailable
+nvm use
+npm run check:node
+npm install --prefix backend
+npm install --prefix frontend
+npm run dev:backend      # terminal 1
+npm run dev:frontend     # terminal 2
+```
+
+Run `nvm use` in each new terminal (or configure nvm's default version). A second Node installation installed via Homebrew or a system package manager can take priority in `PATH`; use `which -a node` and reopen your terminal if you still see an older version. The new `predev` checks reject incompatible Node versions with actionable instructions before the applications start.
+
 ```bash
 cp .env.example .env
 # Leave PUBLIC_ORIGIN empty for local Vite development.
