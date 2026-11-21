@@ -101,7 +101,7 @@ export function allocateCents(amount: number, weights: number[]): number[] {
   if (total <= 0) throw Error('At least one weight is required');
   const raw = weights.map(w => amount * w / total);
   const paid = raw.map(v => Math.floor(v));
-  let left = amount - paid.reduce((a, b) => a + b, 0);
+  const left = amount - paid.reduce((a, b) => a + b, 0);
   const order = weights.map((_, i) => i).sort((a, b) => (raw[b] - Math.floor(raw[b])) - (raw[a] - Math.floor(raw[a])) || a - b);
   for (let i = 0; i < left; i++) paid[order[i]]++;
   return paid;
