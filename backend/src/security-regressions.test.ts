@@ -57,4 +57,15 @@ test('JSON parser rejects look-alike content types', async () => {
   await assert.rejects(readJson(request), {status: 415});
 });
 
+/** Hide persistent account identifiers from anonymous discovery and secret-link previews. */
+test('public catalogue and invitation preview omit owner account identifiers', async () => {
+  const {createTournament, publicCatalogue, invitePreview} = await import('./tournaments.ts');
+  const owner = register('catalog-owner@example.test', 'Catalogue Owner', 'correct-sufficiently-long-password').user;
+  const pool = createTournament(owner, 'Open Privacy Cup', 'Public tournament', 'public');
+  const listing = publicCatalogue().find(x => x.id === pool.id);
+  assert.ok(listing);
+  assert.equal(listing.owner_id, undefined);
+  assert.equal(invitePreview(pool.inviteCode).owner_id, undefined);
+});
+
 test.after(() => rmSync(directory, {recursive: true, force: true}));

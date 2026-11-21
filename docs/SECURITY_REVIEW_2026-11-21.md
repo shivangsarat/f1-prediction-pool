@@ -12,6 +12,7 @@
 | `TRUST_PROXY=1` accepted any valid `X-Real-IP` string | Medium: if the backend port is accidentally exposed, clients could evade IP-based rate limits | Only trust forwarded IPs when connection originates from Docker/private or loopback IP; keep API unexposed and ensure nginx overwrites the header | `security-regressions.test.ts` |
 | JSON parser accepted `application/json-malicious` as `application/json` | Low: content-type confusion | Enforce exact media type plus optional charset parameters | `security-regressions.test.ts` |
 | Display names allowed CR/LF control characters | Medium: malformed notifications and logs | Reject control-character names at registration | `security-regressions.test.ts` |
+| Anonymous catalogue and invite previews exposed account owner IDs | Low–Medium: unnecessary persistent identifier disclosure | Omit owner IDs from unauthenticated public metadata; retain membership-authorized commissioner records | `security-regressions.test.ts` |
 
 Existing critical controls validated in prior suites: salted scrypt password hashes, HttpOnly/SameSite cookies, server-digest session storage, persistent auth throttling, strict CSRF origin checks, operator/commissioner/participant authorization, private invitations, per-tournament ledger records, append-only pick revisions, result review/digest checks, integer-cent payouts and anti-overdraw, AES-GCM encrypted backups and email outbox.
 

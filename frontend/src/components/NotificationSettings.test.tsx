@@ -11,7 +11,7 @@ it('updates personal notifications setting', async () => {
   vi.mocked(get).mockImplementation((path: string) => Promise.resolve(path === '/auth/me' ? {emailVerified: true, notificationOptIn: true} : {available: true}));
   vi.mocked(patch).mockResolvedValue({enabled: false});
   render(<NotificationSettings/>);
-  expect(await screen.findByRole('checkbox', {name: /Receive tournament updates/i})).toBeTruthy();
+  expect(await screen.findByRole('checkbox', {name: /Email me tournament updates/i})).toBeTruthy();
   fireEvent.click(screen.getByRole('checkbox'));
   await waitFor(() => expect(patch).toHaveBeenCalledWith('/account/notifications', {enabled: false}));
 });

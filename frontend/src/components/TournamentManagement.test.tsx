@@ -25,7 +25,7 @@ it('searches usernames and sends a pending invitation', async () => {
   vi.mocked(post).mockResolvedValue({status: 'pending'});
   render(<TournamentManagement tournament={tournament} onChanged={vi.fn()}/>);
   fireEvent.change(screen.getByPlaceholderText('player_username'), {target: {value: 'driver'}});
-  fireEvent.click(screen.getByRole('button', {name: /Find/i}));
+  fireEvent.click(screen.getByRole('button', {name: /^Find$/i}));
   expect(await screen.findByText('@driver44')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', {name: 'Invite'}));
   await waitFor(() => expect(post).toHaveBeenCalledWith('/tournaments/t1/invite-user', {userId: 'u2'}));

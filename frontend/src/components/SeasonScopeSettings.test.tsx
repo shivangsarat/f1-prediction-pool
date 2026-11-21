@@ -14,7 +14,7 @@ it('shows scaled championship and salvage preview from configured race count', (
 it('automatically disables salvage for pure race-by-race tournaments', () => {
   const onChange=vi.fn();
   render(<SeasonScopeSettings value={{openingRound:17,expectedRaces:7,championshipEnabled:true,salvageEnabled:true}} onChange={onChange}/>);
-  fireEvent.click(screen.getByLabelText(/Score season winner predictions/));
+  fireEvent.click(screen.getByRole('checkbox', {name: /Score season winner predictions/}));
   expect(onChange).toHaveBeenCalledWith({openingRound:17,expectedRaces:7,championshipEnabled:false,salvageEnabled:false});
 });
 
@@ -29,7 +29,7 @@ it('freezes all settings at the opening lock', () => {
 it('disables WDC/WCC and August salvage after the selected-year summer break', () => {
   render(<SeasonScopeSettings value={{openingRound:20,expectedRaces:5,championshipEnabled:false,salvageEnabled:false}}
     seasonYear={2026} onChange={vi.fn()}/>);
-  expect((screen.getByLabelText(/Score season winner predictions/) as HTMLInputElement).disabled).toBe(true);
-  expect((screen.getByLabelText(/Allow August winner-pick changes/) as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole('checkbox', {name: /Score season winner predictions/}) as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole('checkbox', {name: /Allow August winner-pick changes/}) as HTMLInputElement).disabled).toBe(true);
   expect(screen.getByText(/After August, a new mid-season pool/)).toBeTruthy();
 });

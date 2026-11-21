@@ -66,7 +66,14 @@ export function publicCatalogue(query = '', scope: 'all' | 'full' | 'mid' = 'all
       AND (?='all' OR (?='mid' AND (t.launch_opening_round>1 OR EXISTS (SELECT 1 FROM seasons s WHERE s.tournament_id=t.id AND s.opening_round>1)))
        OR (?='full' AND t.launch_opening_round=1 AND NOT EXISTS (SELECT 1 FROM seasons s WHERE s.tournament_id=t.id AND s.opening_round>1)))
       AND (t.name LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')
-    ORDER BY t.created_at DESC LIMIT 100`, scope, scope, scope, `%${search}%`, `%${search}%`).map(tournament => ({...tournament, terms: tournamentTerms(tournament.id)}));
+    ORDER BY t.created_at DESC LIMIT 100`, scope, scope, scope, `%${search}%`, `%${search}%`).map(tournament => publicTournamentMetadata(tournament));
+}
+
+/** Remove owner account identifiers from unauthenticated catalogue/invitation previews. */
+function publicTournamentMetadata(tournament: Record<string, any>) {
+  const safe = {...tournament};
+  delete safe.owner_id;
+  return {...safe, terms: tournamentTerms(tournament.id)};
 }
 
 /** Require membership or global operator permission, hiding inaccessible private pools. */
@@ -136,7 +143,7 @@ export function invitePreview(code: unknown) {
   if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(code)) throw new HttpError(404, 'Invitation not found');
   const t = get(`SELECT ${tournamentFields} FROM tournaments t WHERE t.invite_hash=? AND t.status='active'`, inviteHash(code));
   if (!t) throw new HttpError(404, 'Invitation not found');
-  return {...t, terms: tournamentTerms(t.id)};
+  return publicTournamentMetadata(t);
 }
 
 /** Join one active tournament using a secret link; repeat requests do not duplicate memberships. */
